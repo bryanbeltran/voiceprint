@@ -72,6 +72,19 @@ describe("Voiceprint application", () => {
     expect(await screen.findByText(/Imported profile · Voice Profile/)).toBeInTheDocument();
   });
 
+  it("requires explicit approval before learning from an edit pair", async () => {
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Generated draft"), { target: { value: "I am writing this carefully. We are making progress. You can review the next step." } });
+    fireEvent.change(screen.getByLabelText("Your edited final"), { target: { value: "I'm writing this. We're making progress! You can review the next step?" } });
+    fireEvent.click(screen.getByRole("button", { name: /analyze my edit/i }));
+    expect(await screen.findByText(/candidate preference/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /approve these preferences/i }));
+    expect(await screen.findByText(/Approved edit preferences added/i)).toBeInTheDocument();
+    const stored = window.localStorage.getItem("voiceprint-profile-v3") || "";
+    expect(stored).not.toContain("I am writing this carefully");
+    expect(stored).not.toContain("I'm writing this.");
+  });
+
   it("keeps the mobile layout within the viewport-sized DOM", () => {
     render(<App />);
     document.documentElement.style.width = "390px";

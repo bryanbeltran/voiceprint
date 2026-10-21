@@ -4,15 +4,15 @@ Voiceprint's canonical JSON profile is the source of truth. The **Export portabl
 
 ```json
 {
-  "profile": { "schemaVersion": "1.1.0", "...": "sanitized canonical profile" },
+  "profile": { "schemaVersion": "1.2.0", "...": "sanitized canonical profile" },
   "package": {
     "packageVersion": "1.0.0",
     "profileId": "profile-…",
     "profileVersion": 1,
     "generatedAt": "ISO-8601",
     "provenance": {
-      "schemaVersion": "1.1.0",
-      "analysisVersion": "local-heuristics-2",
+      "schemaVersion": "1.2.0",
+      "analysisVersion": "local-heuristics-3",
       "sourceCount": 3
     },
     "install": {
@@ -53,6 +53,8 @@ Artifacts are deterministic for the same profile, register, and evidence setting
 ## Privacy contract
 
 Packages do not contain raw corpus samples. Approved excerpts and supporting excerpts are omitted unless the user explicitly enables approved-evidence retention before export. Source IDs, labels, aggregate metrics, permission state, rights notes, evidence coverage, and spans are retained so a reviewer can understand provenance without receiving the full corpus.
+
+The package can also be produced locally with `npm run voiceprint -- package --profile profile.voiceprint.json --out voiceprint-package.json`. For agent installation, `install` compiles one target/register artifact and creates parent directories as needed. Generated artifacts remain deterministic and should be reviewed before copying into an agent configuration.
 
 ## Installation examples
 

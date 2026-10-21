@@ -7,14 +7,15 @@ The repository is a proper React + TypeScript application. It has no backend and
 ## Product surface
 
 - Guided interview with a live canonical profile preview.
-- Corpus mode for pasted or uploaded TXT/Markdown samples.
-- Deterministic local heuristics for rhythm, paragraph shape, contractions, lexical diversity, function words, pronouns, hedging, openers, punctuation/formatting, message structure, source-fidelity signals, and instruction-like contamination.
-- Per-register feature bands, percentiles, held-out evaluation reports, exact supporting spans, sample coverage, consent, source rights, redaction, and profile-relative drift/coaching reports.
+- Corpus mode for pasted, multi-file, or directory imports of TXT, Markdown, HTML, and conversation JSON samples, with per-file register categorization.
+- Deterministic local heuristics for rhythm, paragraph shape, contractions, lexical diversity, function words, pronouns, hedging, openers, punctuation/formatting, message structure, language abstention, deduplication, source-fidelity signals, and instruction-like contamination.
+- Per-register robust feature bands with quartiles, uncertainty, stability, outlier counts, held-out evaluation reports, claim-specific supporting spans, sample coverage, consent, source rights, redaction, and profile-relative drift/coaching reports.
 - Evidence queue with confidence, provenance, register, and approve/edit/reject controls.
 - Register-aware compilation for default, email, chat, public/social, and technical writing.
 - Universal, Codex, Claude, ChatGPT, Cursor, Gemini, standard Agent Skills, portable package manifests, and canonical JSON exports.
 - Local profile persistence with raw corpus text and unapproved excerpts removed by default.
-- Version snapshots, restore, diffing, reset, import/export, blind A/B comparison, deterministic per-feature scoring, golden analyzer fixtures, held-out audits, and adapter regression fixtures.
+- Version snapshots, restore, diffing, reset, import/export, blind A/B comparison, deterministic feature-first scoring, approved edit learning, golden analyzer fixtures, held-out audits, and adapter regression fixtures.
+- Native CLI commands for compiling context, auditing drafts with CI exit codes, installing generated artifacts, and exporting packages.
 - Responsive, keyboard-accessible UI with reduced-motion support and a testable React component boundary.
 
 ## Run locally
@@ -36,6 +37,16 @@ npm run build
 npm run verify
 ```
 
+The same profile can be used from the local CLI:
+
+```bash
+npm run voiceprint -- context --profile profile.voiceprint.json --target codex --register email
+npm run voiceprint -- audit --profile profile.voiceprint.json draft.txt --threshold 70 --json
+npm run voiceprint -- install --profile profile.voiceprint.json --target agent-skill --out SKILL.md
+```
+
+`audit` and `check` use feature-level drift as the primary score and return exit code `1` below the requested threshold, making them suitable for CI. Draft text is read locally and is not emitted in reports.
+
 `npm run verify` runs the typecheck, lint, unit/component tests, production build, and built-entry assertions in one gate. `npm run preview` serves the production bundle locally.
 
 The UI's **Export portable package** action creates a sanitized package containing the canonical profile, provenance, install guidance, deterministic artifacts for every supported target, and register-specific artifacts. See [docs/PACKAGE.md](docs/PACKAGE.md) for the contract.
@@ -46,9 +57,10 @@ The UI's **Export portable package** action creates a sanitized package containi
 src/main.tsx → src/App.tsx → React components
                          └── domain/
                              ├── profile/schema.ts       canonical schema + invariants
-                             ├── corpus/analyzer.ts      local analysis + contamination
+                             ├── corpus/analyzer.ts      local analysis + provenance
                              ├── compiler/adapters.ts    deterministic target adapters
-                             ├── evaluation/scoring.ts   blind comparison signals
+                             ├── evaluation/scoring.ts   feature-first audits
+                             ├── evaluation/learning.ts  approved edit learning
                              └── persistence/storage.ts  sanitized local envelope
 ```
 
@@ -62,7 +74,7 @@ This is a client-side privacy boundary, not a guarantee against a compromised br
 
 ## Scope and extension seams
 
-The canonical profile is schema version `1.1.0`; imports from `1.0.0` are migrated deterministically. Markdown adapters and package artifacts are compiled outputs, not a second source of truth. `registerAdapter`, `analyzeCorpus`, the typed `CorpusAnalysis` result, and `createVoiceprintPackage` are the documented seams for future targets and analyzers. Unknown profile schema versions are rejected until an explicit migration exists.
+The canonical profile is schema version `1.2.0`; imports from `1.0.0` and `1.1.0` are migrated deterministically. Markdown adapters and package artifacts are compiled outputs, not a second source of truth. `registerAdapter`, `analyzeCorpus`, the typed `CorpusAnalysis` result, `learnFromEdit`, and `createVoiceprintPackage` are the documented seams for future targets and analyzers. Unknown profile schema versions are rejected until an explicit migration exists.
 
 Deliberate non-goals for this release are a hosted database, accounts, silent provider calls, automatic publication, and claims that heuristics reproduce a person perfectly.
 

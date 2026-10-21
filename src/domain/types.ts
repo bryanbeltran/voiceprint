@@ -1,5 +1,6 @@
-export const PROFILE_SCHEMA_VERSION = "1.1.0" as const;
+export const PROFILE_SCHEMA_VERSION = "1.2.0" as const;
 export const LEGACY_PROFILE_SCHEMA_VERSION = "1.0.0" as const;
+export const PREVIOUS_PROFILE_SCHEMA_VERSION = "1.1.0" as const;
 export const STORAGE_SCHEMA_VERSION = 1 as const;
 
 export const REGISTER_NAMES = ["default", "email", "chat", "public", "technical"] as const;
@@ -10,10 +11,11 @@ export type AdapterTarget = (typeof ADAPTER_TARGETS)[number];
 
 export type EvidenceStatus = "pending" | "approved" | "rejected";
 export type EvidenceConfidence = "low" | "medium" | "high";
-export type EvidenceSourceType = "interview" | "corpus" | "manual";
+export type EvidenceSourceType = "interview" | "corpus" | "manual" | "edit";
 export type EvidenceScope = "global" | "register";
 export type SourcePermission = "owned" | "licensed" | "authorized" | "unknown";
 export type FeatureStatus = "within" | "low" | "high" | "insufficient";
+export type CorpusSourceFormat = "plain-text" | "markdown" | "html" | "json" | "unknown";
 
 export interface EvidenceSpan {
   start: number;
@@ -38,6 +40,14 @@ export interface CorpusSourceMetadata {
   wordCount: number;
   characterCount: number;
   heldOut: boolean;
+  sourcePath?: string;
+  format?: CorpusSourceFormat;
+  language?: string;
+  languageConfidence?: number;
+  proseScore?: number;
+  included?: boolean;
+  exclusionReason?: CorpusSampleSummary["exclusionReason"];
+  duplicateOf?: string;
 }
 
 export interface VoiceprintEvidence {
@@ -47,6 +57,7 @@ export interface VoiceprintEvidence {
   sourceType: EvidenceSourceType;
   sourceRef: string;
   sourceId: string;
+  featureId?: string;
   sampleIds: string[];
   span: EvidenceSpan | null;
   supports: EvidenceSupport[];
@@ -58,6 +69,15 @@ export interface VoiceprintEvidence {
   confidence: EvidenceConfidence;
   status: EvidenceStatus;
   createdAt: string;
+}
+
+export interface EvidenceConflict {
+  id: string;
+  featureId: string;
+  message: string;
+  severity: "warning" | "error";
+  evidenceIds: string[];
+  registers: RegisterName[];
 }
 
 export interface RegisterDefinition {
@@ -121,6 +141,7 @@ export interface VoiceprintProfile {
     pendingCount: number;
     lastReviewedAt: string | null;
     analysis?: AnalysisSnapshot;
+    conflicts?: EvidenceConflict[];
   };
 }
 
@@ -158,6 +179,8 @@ export interface CorpusSampleInput {
   rightsNote?: string;
   redact?: boolean;
   heldOut?: boolean;
+  sourcePath?: string;
+  format?: CorpusSourceFormat;
 }
 
 export interface CorpusSampleSummary {
@@ -171,6 +194,14 @@ export interface CorpusSampleSummary {
   heldOut: boolean;
   wordCount: number;
   characterCount: number;
+  sourcePath: string;
+  format: CorpusSourceFormat;
+  language: string;
+  languageConfidence: number;
+  proseScore: number;
+  included: boolean;
+  exclusionReason?: "consent" | "held-out" | "duplicate" | "non-prose" | "unsupported-language" | "empty";
+  duplicateOf?: string;
 }
 
 export interface CorpusMetrics {
@@ -225,6 +256,10 @@ export interface FeatureBand {
   confidence: EvidenceConfidence;
   status: FeatureStatus;
   detail: string;
+  sampleCount: number;
+  outlierCount: number;
+  stability: number;
+  uncertainty: number;
 }
 
 export interface RegisterAnalysis {
@@ -256,6 +291,16 @@ export interface CorpusAnalysis {
   issues: CorpusIssue[];
   contaminationMatches: ContaminationMatch[];
   evidence: VoiceprintEvidence[];
+  conflicts: EvidenceConflict[];
+  language: LanguageSummary;
+  dedupedSampleIds: string[];
+}
+
+export interface LanguageSummary {
+  code: string;
+  label: string;
+  confidence: number;
+  abstained: boolean;
 }
 
 export interface AnalysisSnapshot {
@@ -266,6 +311,9 @@ export interface AnalysisSnapshot {
   heldOutEvaluation?: HeldOutEvaluation | null;
   issues: CorpusIssue[];
   contaminationMatches: ContaminationMatch[];
+  conflicts: EvidenceConflict[];
+  language: LanguageSummary;
+  dedupedSampleIds: string[];
 }
 
 export interface ValidationResult {
@@ -283,6 +331,25 @@ export interface EvidenceDecisionPatch {
   supports?: EvidenceSupport[];
   scope?: EvidenceScope;
   rightsNote?: string;
+  force?: boolean;
+}
+
+export interface EditLearningResult {
+  register: RegisterName;
+  changedFeatures: string[];
+  suggestions: string[];
+  beforeWordCount: number;
+  afterWordCount: number;
+  confidence: EvidenceConfidence;
+}
+
+export interface EditLearningObservation {
+  id: string;
+  register: RegisterName;
+  changedFeatures: string[];
+  suggestions: string[];
+  status: EvidenceStatus;
+  createdAt: string;
 }
 
 export interface CompileOptions {
@@ -321,6 +388,10 @@ export interface ScoreCheck {
 
 export interface ProfileScore {
   overall: number;
+  alignmentScore: number;
+  confidence: EvidenceConfidence;
+  measuredFeatureCount: number;
+  insufficientFeatureCount: number;
   register: string;
   wordCount: number;
   checks: ScoreCheck[];
@@ -340,6 +411,9 @@ export interface FeatureDrift {
   status: FeatureStatus;
   detail: string;
   recommendation: string;
+  coverage?: number;
+  stability?: number;
+  uncertainty?: number;
 }
 
 export interface HeldOutEvaluation {

@@ -110,6 +110,7 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .field { min-width: 0; margin-top: 18px; }
 .field:first-child { margin-top: 0; }
 .field label, .field legend { display: block; margin-bottom: 8px; color: #4e5753; font-size: 11px; font-weight: 850; letter-spacing: .04em; }
+.field .field-label-secondary { margin-top: 12px; color: var(--muted); font-size: 10px; }
 input[type="text"], input[type="file"], textarea, select { width: 100%; border: 0; border-radius: 11px; outline: none; color: #000 !important; -webkit-text-fill-color: #000 !important; opacity: 1 !important; background: #fffefa; box-shadow: inset 0 0 0 1px #aebcb5; }
 input[type="text"], textarea { appearance: none; }
 input[type="text"]::placeholder, textarea::placeholder { color: #234b42; -webkit-text-fill-color: #234b42; opacity: 1; }
@@ -119,6 +120,11 @@ textarea { min-height: 100px; padding: 13px; resize: vertical; line-height: 1.5;
 input[type="text"]:focus, textarea:focus, select:focus, input[type="file"]:focus { box-shadow: inset 0 0 0 1px var(--teal), 0 0 0 3px rgba(7, 94, 98, .1); }
 .field-hint { margin: 7px 0 0; color: #5f6d66; font-size: 10px; line-height: 1.45; }
 .file-list { margin: 8px 0 0; color: var(--teal); font-size: 11px; font-weight: 750; }
+.file-sample-list { display: grid; gap: 7px; margin: 14px 0 17px; padding: 12px; border: 1px solid #d7e5e1; border-radius: 11px; background: #f0f7f5; }
+.file-sample-list > strong { color: var(--teal); font-size: 10px; }
+.file-sample-row { display: grid; grid-template-columns: minmax(0, 1fr) 105px; align-items: center; gap: 8px; color: var(--muted); font-size: 10px; }
+.file-sample-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-sample-row select { min-height: 31px; padding: 0 7px; font-size: 10px; }
 .two-up { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .tone-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .tone-option { position: relative; display: flex; align-items: center; min-height: 52px; gap: 9px; margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px; color: var(--muted); background: #fffefa; cursor: pointer; font-size: 12px; font-weight: 750; }
@@ -174,7 +180,7 @@ input[type="range"] { width: 100%; accent-color: var(--coral); }
 .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 22px 0; }
 .metric { padding: 14px 11px; border-radius: 12px; background: var(--blue); }
 .metric strong { display: block; color: var(--teal); font-family: var(--serif); font-size: 24px; font-weight: 400; }
-.metric span { display: block; margin-top: 3px; color: #55716c; font-size: 10px; line-height: 1.2; }
+.metric span { display: block; margin-top: 3px; color: #4b6862; font-size: 10px; line-height: 1.2; }
 .analysis-list { display: grid; gap: 9px; padding: 0; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; list-style: none; }
 .analysis-list li { padding: 10px 11px; border-left: 3px solid #75a87b; border-radius: 5px; background: #f1f8f1; }
 .analysis-list li.warning { border-color: #d2a743; background: #fff8dd; }
@@ -207,7 +213,9 @@ input[type="range"] { width: 100%; accent-color: var(--coral); }
 .evidence-supports li { display: grid; gap: 2px; }
 .evidence-supports q { color: var(--muted); font-family: var(--serif); }
 .evidence-actions { display: flex; flex-direction: column; gap: 6px; justify-content: center; }
+.evidence-override { max-width: 150px; color: #775b20; font-size: 9px; }
 .mini-button { min-width: 94px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: #fffefa; font-size: 10px; font-weight: 800; }
+.mini-button:disabled { cursor: not-allowed; opacity: .5; }
 .mini-button:hover, .mini-button.active { border-color: var(--teal); color: var(--teal); background: var(--blue); }
 .mini-button.reject:hover, .mini-button.reject.active { border-color: #d28a7c; color: #9c4939; background: #fff0eb; }
 .tool-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 23px; }
@@ -260,6 +268,14 @@ input[type="range"] { width: 100%; accent-color: var(--coral); }
 .audit-coaching { margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; line-height: 1.45; }
 .audit-coaching strong { color: var(--teal); }
 .audit-coaching ul { display: grid; gap: 4px; margin: 7px 0 0; padding-left: 17px; }
+.learning-card { display: grid; gap: 22px; margin-bottom: 24px; padding: 27px; border: 1px solid var(--line); border-radius: var(--radius); background: rgba(255, 253, 248, .84); box-shadow: var(--shadow); }
+.learning-card h3 { margin: 12px 0 7px; font-size: 24px; letter-spacing: -.05em; }
+.learning-card p { max-width: 600px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.learning-grid { display: grid; grid-template-columns: 160px 1fr 1fr; gap: 14px; align-items: start; }
+.learning-grid .button { grid-column: 1 / -1; justify-self: start; }
+.learning-result { padding: 15px; border: 1px solid #d7e5e1; border-radius: 11px; color: var(--muted); background: #f0f7f5; font-size: 11px; line-height: 1.45; }
+.learning-result strong { color: var(--teal); }
+.learning-result ul { display: grid; gap: 5px; margin: 9px 0 13px; padding-left: 18px; }
 .blind-card { display: grid; gap: 13px; }
 .blind-label { color: var(--teal); font-size: 10px; font-weight: 850; letter-spacing: .12em; text-transform: uppercase; }
 .draft-card { padding: 14px; border: 1px solid #d7e5e1; border-radius: 12px; background: #f0f7f5; }
@@ -324,6 +340,8 @@ input[type="range"] { width: 100%; accent-color: var(--coral); }
   .preview-code { margin-inline: 20px; min-height: 330px; padding: 15px; font-size: 10px; }
   .preview-foot { align-items: flex-start; flex-direction: column; }
   .two-up, .tone-grid, .check-grid, .metric-grid, .score-grid, .register-map-grid { grid-template-columns: 1fr; }
+  .learning-grid { grid-template-columns: 1fr; }
+  .learning-grid .button { grid-column: auto; }
   .evidence-card { grid-template-columns: 1fr; }
   .evidence-actions { flex-direction: row; flex-wrap: wrap; justify-content: flex-start; }
   .history-strip { align-items: flex-start; flex-direction: column; gap: 10px; }

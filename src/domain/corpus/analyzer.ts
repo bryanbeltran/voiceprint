@@ -1,10 +1,11 @@
 import { applyCorpusAnalysis as applyCorpusAnalysisToProfile } from "./apply";
-import { createEvidence, normalizeCorpusMetrics, normalizeText } from "../profile/schema";
-import { REGISTER_NAMES, type CorpusAnalysis, type CorpusMetrics, type CorpusSampleInput, type CorpusSampleSummary, type FeatureBand, type RegisterAnalysis, type RegisterName, type SourcePermission, type VoiceprintProfile } from "../types";
+import { createEvidence, hashText, normalizeCorpusMetrics, normalizeText } from "../profile/schema";
+import { REGISTER_NAMES, type CorpusAnalysis, type CorpusMetrics, type CorpusSampleInput, type CorpusSampleSummary, type EvidenceConfidence, type EvidenceConflict, type FeatureBand, type LanguageSummary, type RegisterAnalysis, type RegisterName, type SourcePermission, type VoiceprintProfile } from "../types";
 
-export const ANALYSIS_VERSION = "local-heuristics-2";
+export const ANALYSIS_VERSION = "local-heuristics-3";
 
 const FUNCTION_WORDS = new Set("a an and are as at be by for from had has have he her him his i if in into is it its me my of on or our she that the their them they this to us was we were what when which who will with you your".split(" "));
+const ENGLISH_PROBES = new Set("about after all also because before between but can could day do down each even first get give good how into just know like make more most much must new no not now only other our over people put same see should some such than then there these think time two use very want way well where while why work would yes yet".split(" "));
 const HEDGING_WORDS = new Set("perhaps maybe might may could would likely possibly generally often usually tend seems seem think believe somewhat fairly probably arguably approximately appear appears suggest suggests".split(" "));
 const INJECTION_PATTERNS: RegExp[] = [
   /ignore\s+(?:all\s+)?previous\s+instructions?/i,
@@ -25,6 +26,13 @@ interface NormalizedSample {
   rightsNote: string;
   redacted: boolean;
   heldOut: boolean;
+  sourcePath: string;
+  format: CorpusSampleInput["format"];
+  language: string;
+  languageConfidence: number;
+  proseScore: number;
+  duplicateOf?: string;
+  exclusionReason?: CorpusSampleSummary["exclusionReason"];
 }
 
 interface SpanText {
@@ -64,6 +72,10 @@ function ratio(numerator: number, denominator: number): number {
   return denominator ? numerator / denominator : 0;
 }
 
+function clamp(value: number, min = 0, max = 1): number {
+  return Math.min(max, Math.max(min, value));
+}
+
 function round(value: number, digits = 2): number {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
@@ -89,20 +101,75 @@ export function redactCorpusText(value: string): string {
   return redactText(normalizeText(value, 20_000));
 }
 
+function detectLanguage(text: string): LanguageSummary {
+  const tokenList = words(text);
+  if (tokenList.length < 8) return { code: "und", label: "Undetermined", confidence: .25, abstained: true };
+  const lower = tokenList.map((token) => token.toLowerCase());
+  const englishHits = lower.filter((token) => FUNCTION_WORDS.has(token) || ENGLISH_PROBES.has(token)).length;
+  // eslint-disable-next-line no-control-regex
+  const nonLatin = (text.match(/[^\u0000-\u024f\s\p{P}\p{N}]/gu) || []).length;
+  const nonLatinRatio = ratio(nonLatin, text.length);
+  const confidence = clamp((englishHits / tokenList.length) * 2.4 - nonLatinRatio * 1.5);
+  if (confidence >= .42) return { code: "en", label: "English", confidence: round(confidence, 3), abstained: false };
+  return { code: "und", label: "Undetermined", confidence: round(confidence, 3), abstained: true };
+}
+
+function proseScore(text: string): number {
+  const tokenCount = words(text).length;
+  if (!tokenCount) return 0;
+  const sentenceCount = sentences(text).length;
+  const letters = (text.match(/[\p{L}]/gu) || []).length;
+  const structuralNoise = (text.match(/[{}<>]{2,}|(?:https?:\/\/|www\.)\S+/gi) || []).length;
+  return clamp(.45 * Math.min(1, tokenCount / 20) + .35 * Math.min(1, sentenceCount / 2) + .2 * ratio(letters, Math.max(1, text.length)) - structuralNoise * .12);
+}
+
+function canonicalText(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim().replace(/\s+/g, " ");
+}
+
 function normalizeSamples(samples: CorpusSampleInput[]): NormalizedSample[] {
+  const seen = new Map<string, string>();
   return samples.map((sample, index) => {
     const original = normalizeText(sample?.text ?? sample, 20_000);
     const shouldRedact = sample?.redact !== false;
+    const text = shouldRedact ? redactText(original) : original;
+    const id = normalizeText(sample?.id, 100) || `sample-${index + 1}`;
+    const language = detectLanguage(text);
+    const canonical = canonicalText(text);
+    const duplicateOf = canonical && seen.get(hashText(canonical));
+    if (canonical && !duplicateOf) seen.set(hashText(canonical), id);
+    const sampleLanguage = language.abstained && words(text).length >= 8 && language.confidence < .12 ? "unsupported" : language.code;
+    const sampleProseScore = proseScore(text);
+    const exclusionReason: NormalizedSample["exclusionReason"] = !text
+      ? "empty"
+      : sample?.consentGranted === false
+        ? "consent"
+        : sample?.heldOut === true
+          ? "held-out"
+          : duplicateOf
+            ? "duplicate"
+            : sampleLanguage === "unsupported"
+              ? "unsupported-language"
+              : sampleProseScore < .15
+                ? "non-prose"
+                : undefined;
     return {
-      id: normalizeText(sample?.id, 100) || `sample-${index + 1}`,
+      id,
       label: normalizeText(sample?.label, 160) || normalizeText(sample?.id, 100) || `Sample ${index + 1}`,
-      text: shouldRedact ? redactText(original) : original,
+      text,
       register: REGISTER_NAMES.includes(sample?.register as RegisterName) ? sample.register as RegisterName : "default",
       permission: ["owned", "licensed", "authorized", "unknown"].includes(sample?.permission || "") ? sample.permission as SourcePermission : "owned",
       consentGranted: sample?.consentGranted !== false,
       rightsNote: normalizeText(sample?.rightsNote, 500),
       redacted: shouldRedact && redactText(original) !== original,
-      heldOut: sample?.heldOut === true
+      heldOut: sample?.heldOut === true,
+      sourcePath: normalizeText(sample?.sourcePath, 500),
+      format: sample?.format || "unknown",
+      language: sampleLanguage,
+      languageConfidence: language.confidence,
+      proseScore: sampleProseScore,
+      duplicateOf,
+      exclusionReason
     };
   }).filter((sample) => sample.text.length > 0);
 }
@@ -146,7 +213,6 @@ export function metricsForTexts(texts: string[], fidelityScore = 0): CorpusMetri
   const bulletCount = (corpus.match(/(?:^|\n)\s*(?:[-*+]\s|\d+[.)]\s)/gm) || []).length;
   const headingCount = (corpus.match(/(?:^|\n)\s*#{1,6}\s+/gm) || []).length;
   const markdownCount = (corpus.match(/(?:^|\n)\s*(?:[-*+]\s|\d+[.)]\s|#{1,6}\s)|\*\*|`/gm) || []).length;
-  const listCount = bulletCount;
   const commaCount = (corpus.match(/,/g) || []).length;
   const semicolonCount = (corpus.match(/;/g) || []).length;
   const colonCount = (corpus.match(/:/g) || []).length;
@@ -185,7 +251,7 @@ export function metricsForTexts(texts: string[], fidelityScore = 0): CorpusMetri
     parentheticalRate: ratio(parentheticalCount, tokenList.length),
     bulletRate: ratio(bulletCount, paragraphList.length),
     headingRate: ratio(headingCount, paragraphList.length),
-    listRate: ratio(listCount, paragraphList.length),
+    listRate: ratio(bulletCount, paragraphList.length),
     averageSentencesPerParagraph: ratio(sentenceList.length, paragraphList.length),
     sentenceLengthSpread: round(sentenceWordPercentiles.p90 - sentenceWordPercentiles.p25),
     paragraphLengthSpread: round(paragraphWordPercentiles.p90 - paragraphWordPercentiles.p25),
@@ -240,6 +306,10 @@ export function featureValue(metrics: CorpusMetrics, id: string): number {
 
 export { featureDefinitions };
 
+function featureConfidence(sampleCount: number): EvidenceConfidence {
+  return sampleCount >= 5 ? "high" : sampleCount >= 2 ? "medium" : "low";
+}
+
 function buildBands(register: RegisterName, registerSamples: NormalizedSample[], metrics: CorpusMetrics): FeatureBand[] {
   if (!registerSamples.length) return [];
   const valuesByFeature = new Map<string, number[]>();
@@ -247,15 +317,23 @@ function buildBands(register: RegisterName, registerSamples: NormalizedSample[],
     const sampleMetrics = metricsForTexts([sample.text]);
     featureDefinitions(sampleMetrics).forEach(([id, , value]) => valuesByFeature.set(id, [...(valuesByFeature.get(id) || []), value]));
   });
-  const coverage = Math.min(1, registerSamples.length / 3);
+  const coverage = Math.min(1, registerSamples.length / 5);
   return featureDefinitions(metrics).map(([id, label, value, unit]) => {
     const values = valuesByFeature.get(id) || [];
-    const min = values.length ? Math.min(...values) : value;
-    const max = values.length ? Math.max(...values) : value;
+    const sorted = [...values].sort((a, b) => a - b);
+    const q1 = percentile(sorted, .25);
+    const median = percentile(sorted, .5);
+    const q3 = percentile(sorted, .75);
+    const iqr = Math.max(0, q3 - q1);
     const rateLike = unit === "ratio" || unit === "per word";
-    const margin = values.length > 1 ? Math.max(rateLike ? .02 : .5, (max - min) * .2) : Math.max(rateLike ? .05 : 1, Math.abs(value) * .15);
-    const targetMin = Math.max(0, round(min - margin));
-    const targetMax = round(max + margin);
+    const margin = values.length > 1 ? Math.max(rateLike ? .02 : .5, iqr * .5) : Math.max(rateLike ? .05 : 1, Math.abs(median) * .15);
+    const robustMin = q1 - Math.max(rateLike ? .04 : 1, iqr * 1.5);
+    const robustMax = q3 + Math.max(rateLike ? .04 : 1, iqr * 1.5);
+    const outlierCount = values.filter((sampleValue) => sampleValue < robustMin || sampleValue > robustMax).length;
+    const targetMin = Math.max(0, round(q1 - margin));
+    const targetMax = round(q3 + margin);
+    const stability = round(clamp(1 - ratio(iqr, Math.max(.01, Math.abs(median) + margin))), 3);
+    const uncertainty = round(Math.min(1, ratio(1, Math.sqrt(Math.max(1, values.length))) + ratio(outlierCount, Math.max(1, values.length)) * .5), 3);
     return {
       id,
       label,
@@ -264,9 +342,13 @@ function buildBands(register: RegisterName, registerSamples: NormalizedSample[],
       targetMin,
       targetMax,
       coverage,
-      confidence: registerSamples.length >= 5 ? "high" : registerSamples.length >= 2 ? "medium" : "low",
+      confidence: featureConfidence(registerSamples.length),
       status: values.length ? "within" : "insufficient",
-      detail: `${registerSamples.length} ${register === "default" ? "general" : register} sample${registerSamples.length === 1 ? "" : "s"}; target ${targetMin}–${targetMax} ${unit}.`
+      detail: `${registerSamples.length} ${register === "default" ? "general" : register} sample${registerSamples.length === 1 ? "" : "s"}; robust target ${targetMin}–${targetMax} ${unit}; ${outlierCount} outlier${outlierCount === 1 ? "" : "s"}.`,
+      sampleCount: values.length,
+      outlierCount,
+      stability,
+      uncertainty
     };
   });
 }
@@ -276,9 +358,30 @@ function registerAnalysis(register: RegisterName, registerSamples: NormalizedSam
   return { register, sampleIds: registerSamples.map((sample) => sample.id), sampleCount: registerSamples.length, featureBands: buildBands(register, registerSamples, metrics), metrics };
 }
 
-function firstSupportingSpan(sample: NormalizedSample): { excerpt: string; start: number; end: number } {
-  const span = sentences(sample.text)[0] || { text: sample.text.slice(0, 280), start: 0, end: Math.min(sample.text.length, 280) };
-  return { excerpt: normalizeText(span.text, 800), start: span.start, end: span.end };
+function supportingSpan(sample: NormalizedSample, featureId: string): { excerpt: string; start: number; end: number } {
+  const sentenceList = sentences(sample.text);
+  const paragraphList = paragraphs(sample.text);
+  const sentencePattern: Record<string, RegExp> = {
+    contractions: /['’](?:m|re|ve|ll|d|s|t)\b/i,
+    questions: /\?/,
+    exclamations: /!/,
+    "em-dashes": /[—–]/,
+    commas: /,/,
+    semicolons: /;/,
+    colons: /:/,
+    parentheticals: /[()]/,
+    "first-person": /\b(?:i|we|my|our|me|us)\b/i,
+    "direct-address": /\b(?:you|your|yours)\b/i,
+    "third-person": /\b(?:he|she|they|them|their|his|her|its)\b/i,
+    hedging: new RegExp(`\\b(?:${[...HEDGING_WORDS].join("|")})\\b`, "i"),
+    "lowercase-openings": /^[a-z]/
+  };
+  let candidate = sentenceList.find((sentence) => sentencePattern[featureId]?.test(sentence.text));
+  if (!candidate && featureId.startsWith("paragraph-")) candidate = [...paragraphList].sort((a, b) => a.text.length - b.text.length)[0];
+  if (!candidate && featureId === "sentence-p25") candidate = [...sentenceList].sort((a, b) => a.text.length - b.text.length)[0];
+  if (!candidate && featureId === "sentence-p90") candidate = [...sentenceList].sort((a, b) => b.text.length - a.text.length)[0];
+  candidate ||= sentenceList[0] || paragraphList[0] || { text: sample.text.slice(0, 280), start: 0, end: Math.min(sample.text.length, 280) };
+  return { excerpt: normalizeText(candidate.text, 800), start: candidate.start, end: candidate.end };
 }
 
 function sampleSummary(sample: NormalizedSample): CorpusSampleSummary {
@@ -292,14 +395,59 @@ function sampleSummary(sample: NormalizedSample): CorpusSampleSummary {
     redacted: sample.redacted,
     heldOut: sample.heldOut,
     wordCount: words(sample.text).length,
-    characterCount: sample.text.length
+    characterCount: sample.text.length,
+    sourcePath: sample.sourcePath,
+    format: sample.format || "unknown",
+    language: sample.language,
+    languageConfidence: sample.languageConfidence,
+    proseScore: round(sample.proseScore, 3),
+    included: !sample.exclusionReason && sample.consentGranted && !sample.heldOut,
+    exclusionReason: sample.exclusionReason,
+    duplicateOf: sample.duplicateOf
   };
+}
+
+function summarizeLanguage(samples: NormalizedSample[]): LanguageSummary {
+  const eligible = samples.filter((sample) => sample.consentGranted && !sample.heldOut && !sample.duplicateOf && sample.text);
+  const english = eligible.filter((sample) => sample.language === "en").length;
+  if (!eligible.length) return { code: "und", label: "Undetermined", confidence: 0, abstained: true };
+  const confidence = round(ratio(english, eligible.length), 3);
+  if (confidence >= .7) return { code: "en", label: "English", confidence, abstained: false };
+  return { code: "und", label: "Mixed or undetermined", confidence: round(1 - Math.abs(.5 - confidence), 3), abstained: true };
+}
+
+function buildConflicts(registers: Record<RegisterName, RegisterAnalysis>, evidence: Array<{ id: string; featureId?: string; register: RegisterName }>): EvidenceConflict[] {
+  const conflicts: EvidenceConflict[] = [];
+  const populated = REGISTER_NAMES.filter((register) => registers[register].sampleCount >= 2);
+  const featureIds = new Set(populated.flatMap((register) => registers[register].featureBands.map((band) => band.id)));
+  [...featureIds].forEach((featureId) => {
+    const bands = populated.map((register) => ({ register, band: registers[register].featureBands.find((candidate) => candidate.id === featureId) })).filter((entry): entry is { register: RegisterName; band: FeatureBand } => Boolean(entry.band));
+    if (bands.length < 2) return;
+    const centers = bands.map(({ band }) => (band.targetMin + band.targetMax) / 2);
+    const spread = Math.max(...centers) - Math.min(...centers);
+    const unit = bands[0].band.unit;
+    const threshold = unit === "ratio" || unit === "per word" ? .12 : 3;
+    if (spread <= threshold) return;
+    const registersForConflict = bands.map(({ register }) => register);
+    const evidenceIds = evidence.filter((item) => item.featureId === featureId && registersForConflict.includes(item.register)).map((item) => item.id);
+    conflicts.push({
+      id: `conflict-${hashText(`${featureId}|${registersForConflict.join("|")}`)}`,
+      featureId,
+      message: `${featureId} differs materially between ${registersForConflict.join(" and ")}; keep this rule register-specific instead of applying it globally.`,
+      severity: "warning",
+      evidenceIds,
+      registers: registersForConflict
+    });
+  });
+  return conflicts.slice(0, 12);
 }
 
 export function analyzeCorpus(samples: CorpusSampleInput[] = []): CorpusAnalysis {
   const normalizedSamples = normalizeSamples(samples);
   const rejected = normalizedSamples.filter((sample) => !sample.consentGranted);
-  const usable = normalizedSamples.filter((sample) => sample.consentGranted && !sample.heldOut);
+  const duplicates = normalizedSamples.filter((sample) => Boolean(sample.duplicateOf));
+  const unsupported = normalizedSamples.filter((sample) => sample.language === "unsupported");
+  const usable = normalizedSamples.filter((sample) => sample.consentGranted && !sample.heldOut && !sample.duplicateOf && sample.language !== "unsupported" && !sample.exclusionReason);
   const corpus = usable.map((sample) => sample.text).join("\n\n");
   const contaminationMatches = INJECTION_PATTERNS.flatMap((pattern) => normalizedSamples
     .filter((sample) => pattern.test(sample.text))
@@ -308,10 +456,14 @@ export function analyzeCorpus(samples: CorpusSampleInput[] = []): CorpusAnalysis
     const lines = sample.text.split(/\n/).map((line) => line.trim().toLowerCase()).filter(Boolean);
     return count + lines.length - new Set(lines).size;
   }, 0);
-  const fidelityScore = Math.max(0, Math.min(1, 0.3 + Math.min(usable.length, 5) * .1 + Math.min(words(corpus).length / 1_500, .3) - (contaminationMatches.length ? .35 : 0) - Math.min(repeatedLineCount / 20, .15) - rejected.length * .15));
+  const fidelityScore = Math.max(0, Math.min(1, 0.3 + Math.min(usable.length, 5) * .1 + Math.min(words(corpus).length / 1_500, .3) - (contaminationMatches.length ? .35 : 0) - Math.min(repeatedLineCount / 20, .15) - rejected.length * .15 - duplicates.length * .04));
   const metrics = metricsForTexts(usable.map((sample) => sample.text), round(fidelityScore));
+  const language = summarizeLanguage(normalizedSamples);
   const issues: CorpusAnalysis["issues"] = [];
   if (rejected.length) issues.push({ id: "permission-required", severity: "error", message: `${rejected.length} sample${rejected.length === 1 ? " lacks" : "s lack"} consent and was excluded from analysis.` });
+  if (duplicates.length) issues.push({ id: "duplicate-samples", severity: "warning", message: `${duplicates.length} duplicate sample${duplicates.length === 1 ? " was" : "s were"} excluded from confidence scoring.` });
+  if (unsupported.length) issues.push({ id: "unsupported-language", severity: "warning", message: `${unsupported.length} sample${unsupported.length === 1 ? " uses" : "s use"} a language the local English heuristics cannot measure confidently.` });
+  if (language.abstained && usable.length) issues.push({ id: "language-uncertain", severity: "warning", message: "Language detection abstained or found mixed language; measurements are directional and should be reviewed." });
   if (usable.length < 2) issues.push({ id: "few-samples", severity: "warning", message: "Add at least two consented samples from different moments for stronger source fidelity." });
   if (metrics.wordCount < 120) issues.push({ id: "short-corpus", severity: "warning", message: "The corpus is short; inferred rules and feature bands remain lower confidence." });
   if (repeatedLineCount > 0) issues.push({ id: "repeated-lines", severity: "warning", message: "Repeated lines were detected; duplicates are excluded from confidence scoring." });
@@ -328,10 +480,10 @@ export function analyzeCorpus(samples: CorpusSampleInput[] = []): CorpusAnalysis
     result[register] = registerAnalysis(register, registerGroups[register]);
     return result;
   }, {} as Record<RegisterName, RegisterAnalysis>);
-  const addRule = (register: RegisterName, samplesForRegister: NormalizedSample[], condition: boolean, claim: string, matchingSamples: NormalizedSample[], confidence: "low" | "medium" | "high" = "medium"): void => {
+  const addRule = (register: RegisterName, samplesForRegister: NormalizedSample[], featureId: string, condition: boolean, claim: string, matchingSamples: NormalizedSample[], confidence: EvidenceConfidence = "medium"): void => {
     if (!condition || !matchingSamples.length) return;
     const supports = matchingSamples.map((sample) => {
-      const support = firstSupportingSpan(sample);
+      const support = supportingSpan(sample, featureId);
       return { sampleId: sample.id, sourceId: sample.id, excerpt: support.excerpt, span: { start: support.start, end: support.end } };
     });
     const support = supports[0];
@@ -339,6 +491,7 @@ export function analyzeCorpus(samples: CorpusSampleInput[] = []): CorpusAnalysis
       sourceType: "corpus",
       sourceRef: matchingSamples.map((sample) => sample.label).join(", "),
       sourceId: matchingSamples[0].id,
+      featureId,
       sampleIds: matchingSamples.map((sample) => sample.id),
       span: support.span,
       supports,
@@ -357,17 +510,19 @@ export function analyzeCorpus(samples: CorpusSampleInput[] = []): CorpusAnalysis
     const registerSamples = registerGroups[register];
     const registerMetrics = registerAnalyses[register].metrics;
     const sampleMetrics = (predicate: (metrics: CorpusMetrics) => boolean): NormalizedSample[] => registerSamples.filter((sample) => predicate(metricsForTexts([sample.text])));
-    addRule(register, registerSamples, registerMetrics.contractionRate > 0, "Use contractions when they sound natural.", sampleMetrics((metrics) => metrics.contractionRate > 0), registerMetrics.contractionRate > .01 ? "high" : "medium");
-    addRule(register, registerSamples, registerMetrics.averageParagraphWords > 0 && registerMetrics.averageParagraphWords <= 70, "Keep paragraphs focused and relatively short.", sampleMetrics((metrics) => metrics.averageParagraphWords > 0 && metrics.averageParagraphWords <= 70), registerMetrics.averageParagraphWords <= 45 ? "high" : "medium");
-    addRule(register, registerSamples, registerMetrics.uniqueWordRatio < .65, "Prefer specific, familiar language over unnecessary abstraction.", registerSamples, "low");
-    addRule(register, registerSamples, registerMetrics.questionCount > 0, "Use occasional questions when they help the reader think or orient themselves.", sampleMetrics((metrics) => metrics.questionCount > 0));
-    addRule(register, registerSamples, registerMetrics.exclamationCount > 0, "Use exclamation marks sparingly and only when the energy is intentional.", sampleMetrics((metrics) => metrics.exclamationCount > 0), "low");
-    addRule(register, registerSamples, registerMetrics.directAddressRate > .01, "Address the reader directly when the context calls for it.", sampleMetrics((metrics) => metrics.directAddressRate > .01), registerMetrics.directAddressRate > .03 ? "high" : "medium");
-    addRule(register, registerSamples, registerMetrics.firstPersonRate > .01, "Use a grounded first-person point of view where it adds accountability or warmth.", sampleMetrics((metrics) => metrics.firstPersonRate > .01), registerMetrics.firstPersonRate > .03 ? "high" : "medium");
-    addRule(register, registerSamples, registerMetrics.hedgingRate > .01, "Use careful qualifiers when the evidence or context calls for them.", sampleMetrics((metrics) => metrics.hedgingRate > .01), "low");
-    addRule(register, registerSamples, registerMetrics.lowercaseStartRate > .1, "Preserve lowercase openings when they are part of the writer's natural rhythm.", sampleMetrics((metrics) => metrics.lowercaseStartRate > .1), "medium");
-    addRule(register, registerSamples, registerMetrics.repeatedOpeningRate > .2, "Vary sentence openings unless repetition is doing useful structural work.", sampleMetrics((metrics) => metrics.repeatedOpeningRate > .2), "low");
+    addRule(register, registerSamples, "contractions", registerMetrics.contractionRate > 0, "Use contractions when they sound natural.", sampleMetrics((sampleMetricsForText) => sampleMetricsForText.contractionRate > 0), registerMetrics.contractionRate > .01 ? "high" : "medium");
+    addRule(register, registerSamples, "paragraph-p50", registerMetrics.averageParagraphWords > 0 && registerMetrics.averageParagraphWords <= 70, "Keep paragraphs focused and relatively short.", sampleMetrics((sampleMetricsForText) => sampleMetricsForText.averageParagraphWords > 0 && sampleMetricsForText.averageParagraphWords <= 70), registerMetrics.averageParagraphWords <= 45 ? "high" : "medium");
+    addRule(register, registerSamples, "lexical-diversity", registerMetrics.uniqueWordRatio < .65, "Prefer specific, familiar language over unnecessary abstraction.", registerSamples, "low");
+    addRule(register, registerSamples, "questions", registerMetrics.questionCount > 0, "Use occasional questions when they help the reader think or orient themselves.", sampleMetrics((sampleMetricsForText) => sampleMetricsForText.questionCount > 0));
+    addRule(register, registerSamples, "exclamations", registerMetrics.exclamationCount > 0, "Use exclamation marks sparingly and only when the energy is intentional.", sampleMetrics((sampleMetricsForText) => sampleMetricsForText.exclamationCount > 0), "low");
+    addRule(register, registerSamples, "direct-address", registerMetrics.directAddressRate > .01, "Address the reader directly when the context calls for it.", sampleMetrics((sampleMetricsForText) => sampleMetricsForText.directAddressRate > .01), registerMetrics.directAddressRate > .03 ? "high" : "medium");
+    addRule(register, registerSamples, "first-person", registerMetrics.firstPersonRate > .01, "Use a grounded first-person point of view where it adds accountability or warmth.", sampleMetrics((sampleMetricsForText) => sampleMetricsForText.firstPersonRate > .01), registerMetrics.firstPersonRate > .03 ? "high" : "medium");
+    addRule(register, registerSamples, "hedging", registerMetrics.hedgingRate > .01, "Use careful qualifiers when the evidence or context calls for them.", sampleMetrics((sampleMetricsForText) => sampleMetricsForText.hedgingRate > .01), "low");
+    addRule(register, registerSamples, "lowercase-openings", registerMetrics.lowercaseStartRate > .1, "Preserve lowercase openings when they are part of the writer's natural rhythm.", sampleMetrics((sampleMetricsForText) => sampleMetricsForText.lowercaseStartRate > .1), "medium");
+    addRule(register, registerSamples, "repeated-openings", registerMetrics.repeatedOpeningRate > .2, "Vary sentence openings unless repetition is doing useful structural work.", sampleMetrics((sampleMetricsForText) => sampleMetricsForText.repeatedOpeningRate > .2), "low");
   });
+  const conflicts = buildConflicts(registerAnalyses, evidence);
+  if (conflicts.length) issues.push({ id: "register-conflicts", severity: "warning", message: `${conflicts.length} register-specific measurement conflict${conflicts.length === 1 ? "" : "s"} need review.` });
 
   return {
     analysisVersion: ANALYSIS_VERSION,
@@ -377,7 +532,10 @@ export function analyzeCorpus(samples: CorpusSampleInput[] = []): CorpusAnalysis
     heldOutSampleIds: normalizedSamples.filter((sample) => sample.heldOut).map((sample) => sample.id),
     issues,
     contaminationMatches,
-    evidence
+    evidence,
+    conflicts,
+    language,
+    dedupedSampleIds: duplicates.map((sample) => sample.id)
   };
 }
 

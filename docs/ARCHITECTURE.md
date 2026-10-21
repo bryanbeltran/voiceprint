@@ -9,7 +9,7 @@ Voiceprint is a client-only Vite application. `index.html` bootstraps `src/main.
 - **Composition (`src/App.tsx`)**: workspace state, mode switching, LocalStorage lifecycle, downloads, import/export, toasts, and workflow orchestration.
 - **Presentation (`src/components/`)**: interview, corpus, preview, evidence, history, and evaluation surfaces. Components receive typed props and do not own the canonical profile invariants.
 - **Domain (`src/domain/`)**: normalization, profile construction, validation, corpus feature bands, contamination signals, evidence decisions, versioning, diffing, adapters, package manifests, persistence sanitization, scoring, held-out audits, and regression fixtures.
-- **File boundary (`src/lib/file-text.ts`)**: browser text-file reads with a `File.text()` path and a `FileReader` fallback for older/browser-test environments.
+- **File boundary (`src/lib/file-text.ts`)**: browser reads with a `File.text()` path and a `FileReader` fallback, plus directory imports, HTML stripping, conversation-JSON extraction, format detection, and path-based register categorization.
 - **Packaging (`vite.config.ts`, `index.html`)**: TypeScript/React compilation and production asset bundling. Generated `dist/` output is never hand-edited.
 - **Quality gates (`tests/`)**: domain invariants plus React integration coverage for live preview, corpus analysis, evidence coverage, storage sanitization, blind evaluation, draft audits, package exports, import, and responsive DOM smoke behavior.
 
@@ -18,12 +18,14 @@ Voiceprint is a client-only Vite application. `index.html` bootstraps `src/main.
 ```text
 Interview answers ────────────┐
                               ├─> VoiceprintProfile ─> adapter / JSON export
-TXT/MD files + pasted samples ┘          │
+TXT/MD/HTML/JSON files + pasted samples ┘│
                                         ├─> evidence review ─> approved custom rules
                                         ├─> sanitized LocalStorage envelope
                                         ├─> deterministic feature bands / held-out audits
                                         └─> portable package artifacts
 ```
+
+Generated-draft → user-edited-final pairs are compared in memory by `evaluation/learning.ts`. Only an explicitly approved, aggregate preference becomes evidence and a custom rule; neither draft is persisted.
 
 Raw corpus strings exist only in the current page session and are passed to `analyzeCorpus`. The analysis returns summaries, metrics, issues, contamination matches, and candidate evidence; it does not return raw corpus text. `sanitizeForPersistence` removes raw samples and strips excerpts unless the user opts in to approved evidence retention.
 
@@ -43,12 +45,14 @@ An adapter receives a validated `VoiceprintProfile` and `{ register, includeEvid
 
 - `analysisVersion`
 - per-sample counts and consent/rights metadata without raw text
-- deterministic metrics, register feature bands, percentiles, and coverage
+- deterministic metrics, per-register robust feature bands, quartiles, uncertainty, stability, outlier counts, and coverage
+- language detection with abstention, duplicate detection, prose filtering, and explicit exclusion reasons
 - warning/error issues
 - contamination matches
-- evidence candidates with provenance, register, and confidence
+- evidence candidates with feature IDs, claim-specific supporting spans, provenance, register, and confidence
+- register-specific conflicts that prevent over-generalizing a pattern
 
-A future local model or BYOK service can implement this result shape behind an explicit provider boundary. It must not silently change the privacy boundary or bypass user review. `scoreTextAgainstProfile` and `evaluateHeldOutSamples` are deterministic local gates, not authorship proofs.
+A future local model or BYOK service can implement this result shape behind an explicit provider boundary. It must not silently change the privacy boundary or bypass user review. `scoreTextAgainstProfile` and `evaluateHeldOutSamples` are deterministic local gates, not authorship proofs. Feature drift is the primary score; habits and avoid-phrase checks are secondary. The CLI exposes the same score for local CI checks.
 
 ## Deliberate non-goals
 

@@ -48,7 +48,12 @@ export function profileBody(profile: VoiceprintProfile, options: Required<Compil
   ];
   if (bands.length) {
     lines.push("", "## Measured voice bands");
-    bands.forEach((band) => lines.push(`- ${band.label}: ${band.targetMin}–${band.targetMax} ${band.unit} (${band.confidence} confidence)`));
+    bands.forEach((band) => lines.push(`- ${band.label}: ${band.targetMin}–${band.targetMax} ${band.unit} (${band.confidence} confidence; ${Math.round(band.stability * 100)}% stable; ${Math.round(band.uncertainty * 100)}% uncertainty)`));
+  }
+  const conflicts = profile.review.conflicts?.filter((conflict) => conflict.registers.includes(register)) || [];
+  if (conflicts.length) {
+    lines.push("", "## Register-specific caveats");
+    conflicts.forEach((conflict) => lines.push(`- ${conflict.message}`));
   }
   if (preferences.signOff) lines.push("", "## Natural sign-off", preferences.signOff);
   if (evidence.length) {

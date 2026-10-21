@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   applyCorpusAnalysis,
+  applyEditLearning,
   applyEvidenceDecision,
   buildProfileFromInterview,
   exportVoiceprintPackage,
@@ -17,8 +18,11 @@ import {
   writePersistedState,
   type AdapterTarget,
   type CorpusAnalysis,
+  type CorpusSampleSummary,
+  type CorpusSourceMetadata,
   type CorpusSampleInput,
   type EvidenceDecisionPatch,
+  type EditLearningResult,
   type InterviewAnswers,
   type RegisterName,
   type RegressionResult,
@@ -90,6 +94,48 @@ function answersFromProfile(profile: VoiceprintProfile): InterviewAnswers {
   };
 }
 
+function summaryFromSource(source: CorpusSourceMetadata): CorpusSampleSummary {
+  return {
+    id: source.id,
+    label: source.label,
+    register: source.register,
+    permission: source.permission,
+    consentGranted: source.consentGranted,
+    rightsNote: source.rightsNote,
+    redacted: source.redacted,
+    heldOut: source.heldOut,
+    wordCount: source.wordCount,
+    characterCount: source.characterCount,
+    sourcePath: source.sourcePath || "",
+    format: source.format || "unknown",
+    language: source.language || "und",
+    languageConfidence: source.languageConfidence || 0,
+    proseScore: source.proseScore || 0,
+    included: source.included !== false,
+    exclusionReason: source.exclusionReason,
+    duplicateOf: source.duplicateOf
+  };
+}
+
+function analysisFromProfile(profile: VoiceprintProfile): CorpusAnalysis | null {
+  const snapshot = profile.review.analysis;
+  if (!snapshot) return null;
+  return {
+    analysisVersion: profile.provenance.analysisVersion,
+    samples: snapshot.sources.map(summaryFromSource),
+    metrics: snapshot.metrics,
+    registers: snapshot.registers,
+    heldOutSampleIds: snapshot.heldOutSampleIds,
+    heldOutEvaluation: snapshot.heldOutEvaluation,
+    issues: snapshot.issues,
+    contaminationMatches: snapshot.contaminationMatches,
+    evidence: profile.evidence.filter((item) => item.sourceType === "corpus"),
+    conflicts: snapshot.conflicts,
+    language: snapshot.language,
+    dedupedSampleIds: snapshot.dedupedSampleIds
+  };
+}
+
 function safeStorage(): Storage | null {
   if (typeof window === "undefined") return null;
   try {
@@ -109,17 +155,7 @@ function initialWorkspace(): WorkspaceState {
     profile: loaded.profile,
     answers: answersFromProfile(loaded.profile),
     history: loaded.history,
-    analysis: loaded.profile.review.analysis ? {
-      analysisVersion: loaded.profile.provenance.analysisVersion,
-      samples: [],
-      metrics: loaded.profile.review.analysis.metrics,
-      registers: loaded.profile.review.analysis.registers,
-      heldOutSampleIds: loaded.profile.review.analysis.heldOutSampleIds,
-      heldOutEvaluation: loaded.profile.review.analysis.heldOutEvaluation,
-      issues: loaded.profile.review.analysis.issues,
-      contaminationMatches: loaded.profile.review.analysis.contaminationMatches,
-      evidence: loaded.profile.evidence.filter((item) => item.sourceType === "corpus")
-    } : null,
+    analysis: analysisFromProfile(loaded.profile),
     activeMode: "interview",
     persistApprovedEvidence: loaded.persistApprovedEvidence,
     currentStep: 1,
@@ -178,6 +214,11 @@ export default function App() {
 
   const updateProfile = (updater: (profile: VoiceprintProfile) => VoiceprintProfile): void => {
     setWorkspace((current) => ({ ...current, profile: updater(current.profile) }));
+  };
+
+  const handleEditLearning = (result: EditLearningResult): void => {
+    updateProfile((profile) => applyEditLearning(profile, result));
+    notify("Approved edit preferences added to the profile.");
   };
 
   const handleAnalyze = (samples: CorpusSampleInput[], register: RegisterName): void => {
@@ -265,7 +306,7 @@ export default function App() {
         ...current,
         profile,
         answers: answersFromProfile(profile),
-        analysis: profile.review.analysis ? { analysisVersion: profile.provenance.analysisVersion, samples: profile.review.analysis.sources, ...profile.review.analysis, evidence: profile.evidence.filter((item) => item.sourceType === "corpus") } : null
+        analysis: analysisFromProfile(profile)
       }));
       notify("Canonical profile imported.");
     } catch {
@@ -325,7 +366,7 @@ export default function App() {
       {workspace.activeMode === "interview" && <div className="shell secondary-flow"><EvidenceReview evidence={workspace.profile.evidence} onDecision={handleEvidenceDecision} /><HistoryPanel profile={workspace.profile} history={workspace.history} diff={workspace.historyDiff} onSave={saveVersion} onRestore={restoreVersion} onCompare={compareVersion} onExport={exportCanonicalProfile} onExportPackage={exportPackage} onImport={importCanonicalProfile} onReset={resetProfile} /></div>}
 
       <section className="story-section" id="how-it-works"><div className="shell story-grid"><div className="story-intro"><div className="section-kicker light">How it works</div><h2>Voice is more than tone.</h2><p>Voiceprint separates what you mean from the tool you use. That makes your preferences inspectable, revisable, and yours.</p></div><div className="story-steps"><StoryStep number="01" title="Answer" text="Start with a short guided interview about context, texture, habits, and guardrails." /><StoryStep number="02" title="Inspect" text="Analyze writing you own locally. Candidate rules show their source, confidence, and register." /><StoryStep number="03" title="Carry" text="Approve the useful evidence and compile the same profile for Codex, Claude, ChatGPT, Cursor, or Markdown." /></div></div></section>
-      <EvaluationPanel profile={workspace.profile} />
+      <EvaluationPanel profile={workspace.profile} onLearn={handleEditLearning} />
       <section className="regression-section"><div className="shell regression-panel"><div><div className="section-kicker">Adapter contract</div><h2>Keep every export honest.</h2><p>Run the built-in regression fixtures before you carry a profile into another tool.</p></div><div className="regression-actions"><button className="button secondary" type="button" onClick={runRegression}>Run profile checks</button><pre className="regression-results" aria-live="polite">{regression ? regression.map((result) => `${result.passed ? "PASS" : "FAIL"}  ${result.name}${result.missing.length ? ` — missing: ${result.missing.join(", ")}` : ""}`).join("\n") : "No checks run yet."}</pre></div></div></section>
       <section className="privacy-section" id="privacy"><div className="shell privacy-grid"><div><div className="section-kicker light">06 / Data flow</div><h2>Private until you choose otherwise.</h2></div><div className="privacy-copy"><p>Interview answers, profile state, and approved rules are stored in this browser only. Writing samples are analyzed in memory. Raw samples and unapproved evidence excerpts are removed before persistence by default.</p><p>The app ships with local heuristics and no provider call. A future local-model or BYOK analyzer can plug into the same typed analysis contract without changing your profile format.</p><div className="data-flow"><span>Input</span><span>Browser memory</span><span>Sanitized profile</span><span>Export on demand</span></div></div></div></section>
     </main>

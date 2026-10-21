@@ -1,5 +1,6 @@
 import {
   LEGACY_PROFILE_SCHEMA_VERSION,
+  PREVIOUS_PROFILE_SCHEMA_VERSION,
   PROFILE_SCHEMA_VERSION,
   REGISTER_NAMES,
   type BuildProfileOptions,
@@ -13,6 +14,8 @@ import {
   type RegisterDefinition,
   type RegisterName,
   type CorpusMetrics,
+  type FeatureBand,
+  type LanguageSummary,
   type RegisterAnalysis,
   type SourcePermission,
   type ValidationResult,
@@ -69,6 +72,13 @@ function firstSentence(value: unknown): string {
 }
 
 const EMPTY_PERCENTILES = { p25: 0, p50: 0, p75: 0, p90: 0 };
+
+const EMPTY_LANGUAGE: LanguageSummary = {
+  code: "und",
+  label: "Undetermined",
+  confidence: 0,
+  abstained: true
+};
 
 export function normalizeCorpusMetrics(input: Partial<CorpusMetrics> = {}): CorpusMetrics {
   return {
@@ -128,10 +138,35 @@ function normalizeRegisterAnalyses(input: unknown, metrics: Partial<CorpusMetric
       sampleIds: Array.isArray(candidate?.sampleIds) ? candidate.sampleIds.map((id) => normalizeText(id, 120)) : [],
       sampleCount: Number(candidate?.sampleCount) || 0,
       metrics: normalizeCorpusMetrics(candidate?.metrics || metrics),
-      featureBands: Array.isArray(candidate?.featureBands) ? candidate.featureBands : []
+      featureBands: Array.isArray(candidate?.featureBands) ? candidate.featureBands.filter(Boolean).map((band) => normalizeFeatureBand(band as Partial<FeatureBand>)) : []
     };
     return result;
   }, {} as Record<RegisterName, RegisterAnalysis>);
+}
+
+function normalizeFeatureBand(input: Partial<FeatureBand> = {}): FeatureBand {
+  const status: FeatureBand["status"] = ["within", "low", "high", "insufficient"].includes(input.status || "")
+    ? input.status as FeatureBand["status"]
+    : "insufficient";
+  const confidence: EvidenceConfidence = ["low", "medium", "high"].includes(input.confidence || "")
+    ? input.confidence as EvidenceConfidence
+    : "low";
+  return {
+    id: normalizeText(input.id, 120),
+    label: normalizeText(input.label, 160),
+    value: Number(input.value) || 0,
+    unit: normalizeText(input.unit, 40),
+    targetMin: Number(input.targetMin) || 0,
+    targetMax: Number(input.targetMax) || 0,
+    coverage: Math.min(1, Math.max(0, Number(input.coverage) || 0)),
+    confidence,
+    status,
+    detail: normalizeText(input.detail, 500),
+    sampleCount: Math.max(0, Number(input.sampleCount) || 0),
+    outlierCount: Math.max(0, Number(input.outlierCount) || 0),
+    stability: Math.min(1, Math.max(0, Number(input.stability) || 0)),
+    uncertainty: Math.max(0, Number(input.uncertainty) || 0)
+  };
 }
 
 function defaultRegister(label = "Default"): RegisterDefinition {
@@ -163,7 +198,7 @@ export function stableStringify(value: unknown, space = 2): string {
 export function createEvidence(input: Partial<VoiceprintEvidence> & { claim?: string } = {}): VoiceprintEvidence {
   const normalizedClaim = normalizeText(input.claim, 500);
   const normalizedExcerpt = normalizeText(input.excerpt, 800);
-  const sourceType: EvidenceSourceType = ["interview", "corpus", "manual"].includes(input.sourceType ?? "")
+  const sourceType: EvidenceSourceType = ["interview", "corpus", "manual", "edit"].includes(input.sourceType ?? "")
     ? (input.sourceType as EvidenceSourceType)
     : "manual";
   const register: RegisterName = REGISTER_NAMES.includes(input.register as RegisterName)
@@ -207,6 +242,7 @@ export function createEvidence(input: Partial<VoiceprintEvidence> & { claim?: st
     sourceType,
     sourceRef,
     sourceId,
+    featureId: normalizeText(input.featureId, 120) || undefined,
     sampleIds,
     span,
     supports,
@@ -304,10 +340,10 @@ export function buildProfileFromInterview(
       sampleCount: normalized.sample ? 1 : 0,
       retainedRawText: false,
       corpusHash: normalized.sample ? hashText(normalized.sample) : null,
-      analysisVersion: "local-heuristics-2",
+      analysisVersion: "local-heuristics-3",
       sources: []
     },
-    review: { pendingCount: evidence.length, lastReviewedAt: null }
+    review: { pendingCount: evidence.length, lastReviewedAt: null, conflicts: [] }
   };
   return validateProfile(profile).value;
 }
@@ -340,9 +376,11 @@ export function applyEvidenceDecision(
   const next = clone(profile);
   const item = next.evidence.find((entry) => entry.id === evidenceId);
   if (!item) return next;
-  const status: EvidenceStatus = ["pending", "approved", "rejected"].includes(patch.status || "")
+  const requestedStatus: EvidenceStatus = ["pending", "approved", "rejected"].includes(patch.status || "")
     ? (patch.status as EvidenceStatus)
     : item.status;
+  const requiresExplicitOverride = item.sourceType === "corpus" && (item.coverage < .5 || item.confidence === "low");
+  const status: EvidenceStatus = requestedStatus === "approved" && requiresExplicitOverride && !patch.force ? "pending" : requestedStatus;
   item.status = status;
   if (patch.claim !== undefined) item.claim = normalizeText(patch.claim, 500);
   if (patch.register && REGISTER_NAMES.includes(patch.register)) item.register = patch.register;
@@ -390,7 +428,8 @@ export function sanitizeForPersistence(
 export function migrateProfile(input: unknown): unknown {
   if (!input || typeof input !== "object") return input;
   const source = clone(input) as Partial<VoiceprintProfile> & Record<string, unknown>;
-  if ((source as Record<string, unknown>).schemaVersion !== LEGACY_PROFILE_SCHEMA_VERSION) return source;
+  const schemaVersion = (source as Record<string, unknown>).schemaVersion;
+  if (schemaVersion !== LEGACY_PROFILE_SCHEMA_VERSION && schemaVersion !== PREVIOUS_PROFILE_SCHEMA_VERSION) return source;
   const oldAnalysis = source.review && typeof source.review === "object"
     ? (source.review as Partial<VoiceprintProfile["review"]>).analysis
     : undefined;
@@ -399,7 +438,7 @@ export function migrateProfile(input: unknown): unknown {
   source.provenance = {
     ...(source.provenance as VoiceprintProfile["provenance"]),
     analysisVersion: source.provenance?.analysisVersion || "local-heuristics-1",
-    sources: []
+    sources: source.provenance?.sources || []
   };
   if (Array.isArray(source.evidence)) source.evidence = source.evidence.map((item) => createEvidence(item as Partial<VoiceprintEvidence>));
   if (oldAnalysis) {
@@ -407,13 +446,21 @@ export function migrateProfile(input: unknown): unknown {
       ...(source.review as VoiceprintProfile["review"]),
       analysis: {
         metrics: normalizeCorpusMetrics(oldMetrics),
-        registers: normalizeRegisterAnalyses(undefined, oldMetrics),
-        sources: [],
+        registers: oldAnalysis.registers || normalizeRegisterAnalyses(undefined, oldMetrics),
+        sources: oldAnalysis.sources || source.provenance?.sources || [],
         heldOutSampleIds: [],
         issues: oldAnalysis.issues || [],
-        contaminationMatches: oldAnalysis.contaminationMatches || []
+        contaminationMatches: oldAnalysis.contaminationMatches || [],
+        conflicts: oldAnalysis.conflicts || [],
+        language: oldAnalysis.language || EMPTY_LANGUAGE,
+        dedupedSampleIds: oldAnalysis.dedupedSampleIds || []
       }
     };
+  }
+  source.schemaVersion = PROFILE_SCHEMA_VERSION;
+  if (source.review && typeof source.review === "object") {
+    const review = source.review as VoiceprintProfile["review"];
+    review.conflicts = Array.isArray(review.conflicts) ? review.conflicts : [];
   }
   return source;
 }
@@ -438,8 +485,16 @@ export function validateProfile(input: unknown): ValidationResult {
   }
   if (value.provenance && typeof value.provenance === "object") {
     const provenance = value.provenance as VoiceprintProfile["provenance"];
-    provenance.sources = Array.isArray(provenance.sources) ? provenance.sources.filter(Boolean) : [];
-    provenance.analysisVersion = normalizeText(provenance.analysisVersion, 120) || "local-heuristics-2";
+    provenance.sources = Array.isArray(provenance.sources) ? provenance.sources.filter(Boolean).map((source) => ({
+      ...source,
+      sourcePath: normalizeText(source.sourcePath, 500) || undefined,
+      format: source.format || "unknown",
+      language: normalizeText(source.language, 20) || undefined,
+      languageConfidence: Math.min(1, Math.max(0, Number(source.languageConfidence) || 0)),
+      proseScore: Math.min(1, Math.max(0, Number(source.proseScore) || 0)),
+      included: source.included !== false
+    })) : [];
+    provenance.analysisVersion = normalizeText(provenance.analysisVersion, 120) || "local-heuristics-3";
   }
   if (value.review && typeof value.review === "object" && value.review.analysis) {
     const analysis = value.review.analysis;
@@ -448,6 +503,16 @@ export function validateProfile(input: unknown): ValidationResult {
     analysis.sources = Array.isArray(analysis.sources) ? analysis.sources : [];
     analysis.heldOutSampleIds = Array.isArray(analysis.heldOutSampleIds) ? analysis.heldOutSampleIds : [];
     if (analysis.heldOutEvaluation === undefined) analysis.heldOutEvaluation = null;
+    analysis.conflicts = Array.isArray(analysis.conflicts) ? analysis.conflicts : [];
+    analysis.language = analysis.language && typeof analysis.language === "object"
+      ? {
+        code: normalizeText(analysis.language.code, 20) || "und",
+        label: normalizeText(analysis.language.label, 80) || "Undetermined",
+        confidence: Math.min(1, Math.max(0, Number(analysis.language.confidence) || 0)),
+        abstained: Boolean(analysis.language.abstained)
+      }
+      : EMPTY_LANGUAGE;
+    analysis.dedupedSampleIds = Array.isArray(analysis.dedupedSampleIds) ? analysis.dedupedSampleIds : [];
   }
   if (value.preferences && typeof value.preferences === "object") {
     const preferences = value.preferences as VoiceprintProfile["preferences"];
@@ -463,6 +528,9 @@ export function validateProfile(input: unknown): ValidationResult {
       plainLanguage: toBoolean(preferences.habits?.plainLanguage, true),
       emDash: toBoolean(preferences.habits?.emDash, false)
     };
+  }
+  if (value.review && typeof value.review === "object") {
+    value.review.conflicts = Array.isArray(value.review.conflicts) ? value.review.conflicts : [];
   }
   if (errors.length) return { valid: false, errors, warnings, value: value as VoiceprintProfile };
   return { valid: true, errors, warnings, value: value as VoiceprintProfile };

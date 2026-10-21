@@ -3,6 +3,7 @@ import {
   analyzeCorpus,
   applyCorpusAnalysis,
   applyEvidenceDecision,
+  applyEditLearning,
   ADAPTER_TARGETS,
   buildProfileFromInterview,
   createVoiceprintPackage,
@@ -14,6 +15,7 @@ import {
   exportVoiceprintPackage,
   featureDefinitions,
   importProfile,
+  learnFromEdit,
   runRegressionFixtures,
   runFeatureRegressionFixtures,
   redactCorpusText,
@@ -48,7 +50,7 @@ describe("Voiceprint domain", () => {
     const profile = sampleProfile();
     const result = validateProfile(profile);
     expect(result.valid).toBe(true);
-    expect(profile.schemaVersion).toBe("1.1.0");
+    expect(profile.schemaVersion).toBe("1.2.0");
     expect(profile.profileId).toBe("profile-test");
     expect(Object.keys(profile.registers).sort()).toEqual(["chat", "default", "email", "public", "technical"]);
     expect(profile.provenance.retainedRawText).toBe(false);
@@ -94,6 +96,7 @@ describe("Voiceprint domain", () => {
     expect(featureDefinitions(email.metrics).map(([id]) => id)).toContain("sentence-spread");
     const evidence = analysis.evidence.find((item) => item.register === "email");
     expect(evidence?.supports.length).toBeGreaterThanOrEqual(1);
+    expect(evidence?.featureId).toBeTruthy();
     evidence?.supports.forEach((support) => {
       const source = samples.find((sample) => sample.id === support.sampleId);
       expect(source).toBeDefined();
@@ -139,6 +142,16 @@ describe("Voiceprint domain", () => {
     expect(diffProfiles(profile, versioned).changed).toBe(true);
     const rejected = applyEvidenceDecision(versioned, evidence!.id, { status: "rejected" }, { now: fixedNow });
     expect(rejected.preferences.customRules).toHaveLength(0);
+  });
+
+  it("requires an explicit override before promoting low-confidence corpus evidence", () => {
+    const profile = applyCorpusAnalysis(sampleProfile(), analyzeCorpus([{ id: "single", text: "I write and write and write and write. You can use the words." }]), { now: fixedNow });
+    const candidate = profile.evidence.find((item) => item.sourceType === "corpus" && item.confidence === "low");
+    expect(candidate).toBeDefined();
+    const held = applyEvidenceDecision(profile, candidate!.id, { status: "approved" }, { now: fixedNow });
+    expect(held.evidence.find((item) => item.id === candidate!.id)?.status).toBe("pending");
+    const forced = applyEvidenceDecision(profile, candidate!.id, { status: "approved", force: true }, { now: fixedNow });
+    expect(forced.evidence.find((item) => item.id === candidate!.id)?.status).toBe("approved");
   });
 
   it("round-trips canonical JSON without changing evidence identity", () => {
@@ -188,6 +201,35 @@ describe("Voiceprint domain", () => {
     expect(results.some((result) => result.feature === "questions")).toBe(true);
   });
 
+  it("uses robust bands, duplicate detection, and language abstention", () => {
+    const analysis = analyzeCorpus([
+      { id: "one", register: "email", text: "I'm writing this note because the next step is clear. You can review it today." },
+      { id: "two", register: "email", text: "I'm writing this note because the next step is clear. You can review it today." },
+      { id: "three", register: "email", text: "Perhaps we can make the decision concrete? I think the small example helps." },
+      { id: "other-language", text: "Hola mundo esta es una muestra escrita en otro idioma para revisar" }
+    ]);
+    expect(analysis.dedupedSampleIds).toEqual(["two"]);
+    expect(analysis.issues.some((issue) => issue.id === "duplicate-samples")).toBe(true);
+    expect(analysis.issues.some((issue) => issue.id === "unsupported-language")).toBe(true);
+    const band = analysis.registers.email.featureBands.find((candidate) => candidate.id === "sentence-p50");
+    expect(band?.stability).toBeGreaterThanOrEqual(0);
+    expect(band?.uncertainty).toBeGreaterThan(0);
+    expect(band?.sampleCount).toBe(2);
+  });
+
+  it("learns only aggregate preferences from an approved edit pair", () => {
+    const result = learnFromEdit(
+      "I am writing this carefully. We are making progress. You can review the next step.",
+      "I'm writing this. We're making progress! You can review the next step?",
+      "email"
+    );
+    expect(result.suggestions.length).toBeGreaterThan(0);
+    const learned = applyEditLearning(sampleProfile(), result, { now: fixedNow });
+    expect(learned.evidence.some((item) => item.sourceType === "edit" && item.status === "approved")).toBe(true);
+    expect(learned.preferences.customRules.some((rule) => rule.register === "email")).toBe(true);
+    expect(exportProfile(learned)).not.toContain("I am writing this carefully");
+  });
+
   it("migrates the 1.0 profile shape and rejects unknown versions", () => {
     const profile = sampleProfile();
     const legacy = JSON.parse(exportProfile(profile)) as Record<string, unknown>;
@@ -196,7 +238,7 @@ describe("Voiceprint domain", () => {
     legacyReview.analysis = { metrics: (legacyReview.analysis as Record<string, unknown> | undefined)?.metrics || {}, issues: [], contaminationMatches: [] };
     const migrated = importProfile(legacy);
     expect(migrated.valid).toBe(true);
-    expect(migrated.value.schemaVersion).toBe("1.1.0");
+    expect(migrated.value.schemaVersion).toBe("1.2.0");
     expect(Object.keys(migrated.value.review.analysis?.registers || {})).toHaveLength(5);
     expect(migrated.value.evidence[0].supports).toEqual([]);
     const unknown = importProfile({ ...legacy, schemaVersion: "9.9.9" });

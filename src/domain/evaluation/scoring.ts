@@ -1,7 +1,7 @@
 import { featureValue, metricsForTexts } from "../corpus/analyzer";
 import { normalizeText } from "../profile/schema";
 import { compileProfile } from "../compiler/adapters";
-import type { AdapterTarget, FeatureDrift, FeatureRegressionResult, FeatureStatus, HeldOutEvaluation, ProfileScore, RegressionResult, RegisterName, VoiceprintProfile } from "../types";
+import type { AdapterTarget, EvidenceConfidence, FeatureDrift, FeatureRegressionResult, FeatureStatus, HeldOutEvaluation, ProfileScore, RegressionResult, RegisterName, VoiceprintProfile } from "../types";
 
 const STOP_WORDS = new Set(["a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "he", "i", "if", "in", "is", "it", "its", "of", "on", "or", "that", "the", "this", "to", "was", "we", "were", "with", "you"]);
 
@@ -41,6 +41,10 @@ function featureRecommendation(feature: Pick<FeatureDrift, "status" | "label" | 
   if (feature.status === "insufficient") return `Collect more approved samples before changing ${feature.label.toLowerCase()}.`;
   const target = feature.status === "low" ? `at least ${feature.targetMin}` : `no more than ${feature.targetMax}`;
   return `Aim for ${target} ${feature.unit} for ${feature.label.toLowerCase()}.`;
+}
+
+function confidenceForFeatureCount(count: number): EvidenceConfidence {
+  return count >= 12 ? "high" : count >= 5 ? "medium" : "low";
 }
 
 const FEATURE_GOLDEN_FIXTURES: Array<{ name: string; text: string; expected: Record<string, number> }> = [
@@ -112,14 +116,23 @@ export function scoreTextAgainstProfile(text: string, profile: VoiceprintProfile
     const actual = round(featureValue(metrics, band.id));
     const status = band.coverage < .34 ? "insufficient" : statusFor(actual, band.targetMin, band.targetMax);
     const recommendation = featureRecommendation({ label: band.label, status, targetMin: band.targetMin, targetMax: band.targetMax, unit: band.unit });
-    return { id: band.id, label: band.label, actual, targetMin: band.targetMin, targetMax: band.targetMax, unit: band.unit, status, detail: status === "within" ? "Within the observed profile band." : status === "insufficient" ? "Not enough reference samples for a confident comparison." : `${status === "low" ? "Below" : "Above"} the observed profile band.`, recommendation };
+    return { id: band.id, label: band.label, actual, targetMin: band.targetMin, targetMax: band.targetMax, unit: band.unit, status, detail: status === "within" ? "Within the observed profile band." : status === "insufficient" ? "Not enough reference samples for a confident comparison." : `${status === "low" ? "Below" : "Above"} the observed profile band.`, recommendation, coverage: band.coverage, stability: band.stability, uncertainty: band.uncertainty };
   });
   features.forEach((feature) => add(feature.label, featureScore(feature), feature.detail));
   const expectedRegister = profile.registers?.[register]?.label || register;
-  const overall = round(ratio(checks.reduce((sum, check) => sum + check.score, 0), checks.length) * 100, 0);
+  const measuredFeatures = features.filter((feature) => feature.status !== "insufficient");
+  const insufficientFeatureCount = features.length - measuredFeatures.length;
+  const weightedFeatureTotal = measuredFeatures.reduce((sum, feature) => {
+    const confidenceWeight = Math.max(.35, 1 - (feature.uncertainty || 0));
+    return sum + featureScore(feature) * confidenceWeight;
+  }, 0);
+  const weightedFeatureDenominator = measuredFeatures.reduce((sum, feature) => sum + Math.max(.35, 1 - (feature.uncertainty || 0)), 0);
+  const fallbackScore = ratio(checks.reduce((sum, check) => sum + check.score, 0), checks.length);
+  const alignmentScore = round((measuredFeatures.length ? ratio(weightedFeatureTotal, weightedFeatureDenominator) : fallbackScore) * 100, 0);
+  const overall = alignmentScore;
   const recommendations = features.filter((feature) => feature.status !== "within").map((feature) => feature.recommendation);
   if (matchedAvoid.length) recommendations.unshift(`Review or replace configured avoid phrases: ${matchedAvoid.join(", ")}.`);
-  return { overall, register: expectedRegister, wordCount: tokenList.length, checks, features, driftCount: features.filter((feature) => feature.status === "low" || feature.status === "high").length, matchedAvoid, recommendations };
+  return { overall, alignmentScore, confidence: confidenceForFeatureCount(measuredFeatures.length), measuredFeatureCount: measuredFeatures.length, insufficientFeatureCount, register: expectedRegister, wordCount: tokenList.length, checks, features, driftCount: features.filter((feature) => feature.status === "low" || feature.status === "high").length, matchedAvoid, recommendations };
 }
 
 export function evaluateHeldOutSamples(profile: VoiceprintProfile, samples: Array<{ id: string; label?: string; text: string }>, register: RegisterName = "default"): HeldOutEvaluation {
