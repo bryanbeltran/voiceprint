@@ -23,6 +23,7 @@ describe("Voiceprint application", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Analyze writing samples" }));
     const input = screen.getByLabelText("Writing samples");
     fireEvent.change(input, { target: { value: "I'm writing this because the plan is clear. You can start with the small step.\n\n---\n\nWe are close. I want the reader to understand what changes and why it matters." } });
+    fireEvent.click(screen.getByLabelText(/right to use these samples/i));
     fireEvent.click(screen.getByRole("button", { name: /analyze samples/i }));
     expect(await screen.findByText(/Analysis result/i)).toBeInTheDocument();
     const approve = screen.getAllByRole("button", { name: "Approve" })[0];
@@ -31,6 +32,27 @@ describe("Voiceprint application", () => {
     const stored = window.localStorage.getItem("voiceprint-profile-v3") || "";
     expect(stored).not.toContain("rawSamples");
     expect(stored).not.toContain("I'm writing this because");
+  });
+
+  it("imports multiple text files and audits a draft without persisting its text", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("tab", { name: "Analyze writing samples" }));
+    const files = [
+      new File(["I'm writing this note for the team. You can use the example."], "one.txt", { type: "text/plain" }),
+      new File(["We’re making progress. I think the next step is clear."], "two.md", { type: "text/markdown" })
+    ];
+    fireEvent.change(screen.getByLabelText("Add text files"), { target: { files } });
+    expect(await screen.findByText(/Loaded: one\.txt, two\.md/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText(/right to use these samples/i));
+    fireEvent.click(screen.getByRole("button", { name: /analyze samples/i }));
+    expect(await screen.findByText(/Source inventory/i)).toBeInTheDocument();
+
+    const audit = screen.getByLabelText("Draft or held-out sample");
+    fireEvent.change(audit, { target: { value: "I am writing a draft that should be checked." } });
+    fireEvent.click(screen.getByRole("button", { name: /run voice audit/i }));
+    expect(await screen.findByText(/style alignment/i)).toBeInTheDocument();
+    const stored = window.localStorage.getItem("voiceprint-profile-v3") || "";
+    expect(stored).not.toContain("I am writing a draft that should be checked.");
   });
 
   it("supports blind evaluation and canonical profile import", async () => {

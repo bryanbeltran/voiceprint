@@ -139,12 +139,22 @@ export function metricsForTexts(texts: string[], fidelityScore = 0): CorpusMetri
   const exclamationCount = (corpus.match(/!/g) || []).length;
   const firstPersonCount = (lower.match(/\b(?:i|we|my|our|me|us)\b/g) || []).length;
   const directAddressCount = (lower.match(/\b(?:you|your|yours)\b/g) || []).length;
+  const thirdPersonCount = (lower.match(/\b(?:he|she|they|them|their|his|her|its)\b/g) || []).length;
   const functionWordCount = tokenList.filter((word) => FUNCTION_WORDS.has(word.toLowerCase())).length;
   const hedgingCount = tokenList.filter((word) => HEDGING_WORDS.has(word.toLowerCase())).length;
   const lowercaseStartCount = sentenceList.filter((sentence) => /^[a-z]/.test(sentence.text)).length;
-  const markdownCount = (corpus.match(/(?:^|\n)\s*(?:[-*+]\s|#{1,6}\s)|\*\*|`/gm) || []).length;
+  const bulletCount = (corpus.match(/(?:^|\n)\s*(?:[-*+]\s|\d+[.)]\s)/gm) || []).length;
+  const headingCount = (corpus.match(/(?:^|\n)\s*#{1,6}\s+/gm) || []).length;
+  const markdownCount = (corpus.match(/(?:^|\n)\s*(?:[-*+]\s|\d+[.)]\s|#{1,6}\s)|\*\*|`/gm) || []).length;
+  const listCount = bulletCount;
+  const commaCount = (corpus.match(/,/g) || []).length;
+  const semicolonCount = (corpus.match(/;/g) || []).length;
+  const colonCount = (corpus.match(/:/g) || []).length;
+  const parentheticalCount = (corpus.match(/[()]/g) || []).length;
   const uniqueWords = new Set(tokenList.map((word) => word.toLowerCase())).size;
   const repeatedOpeners = openerCounts(sentenceList).filter((entry) => entry.count > 1).reduce((total, entry) => total + entry.count, 0);
+  const sentenceWordPercentiles = { p25: percentile(sentenceLengths, .25), p50: percentile(sentenceLengths, .5), p75: percentile(sentenceLengths, .75), p90: percentile(sentenceLengths, .9) };
+  const paragraphWordPercentiles = { p25: percentile(paragraphLengths, .25), p50: percentile(paragraphLengths, .5), p75: percentile(paragraphLengths, .75), p90: percentile(paragraphLengths, .9) };
   return normalizeCorpusMetrics({
     sampleCount: texts.length,
     wordCount: tokenList.length,
@@ -162,11 +172,25 @@ export function metricsForTexts(texts: string[], fidelityScore = 0): CorpusMetri
     directAddressRate: ratio(directAddressCount, tokenList.length),
     functionWordRate: ratio(functionWordCount, tokenList.length),
     hedgingRate: ratio(hedgingCount, tokenList.length),
+    thirdPersonRate: ratio(thirdPersonCount, tokenList.length),
     lowercaseStartRate: ratio(lowercaseStartCount, sentenceList.length),
     markdownRate: ratio(markdownCount, tokenList.length),
     repeatedOpeningRate: ratio(repeatedOpeners, sentenceList.length),
-    sentenceWordPercentiles: { p25: percentile(sentenceLengths, .25), p50: percentile(sentenceLengths, .5), p75: percentile(sentenceLengths, .75), p90: percentile(sentenceLengths, .9) },
-    paragraphWordPercentiles: { p25: percentile(paragraphLengths, .25), p50: percentile(paragraphLengths, .5), p75: percentile(paragraphLengths, .75), p90: percentile(paragraphLengths, .9) },
+    questionRate: ratio(questionCount, sentenceList.length),
+    exclamationRate: ratio(exclamationCount, sentenceList.length),
+    emDashRate: ratio(emDashCount, tokenList.length),
+    commaRate: ratio(commaCount, tokenList.length),
+    semicolonRate: ratio(semicolonCount, tokenList.length),
+    colonRate: ratio(colonCount, tokenList.length),
+    parentheticalRate: ratio(parentheticalCount, tokenList.length),
+    bulletRate: ratio(bulletCount, paragraphList.length),
+    headingRate: ratio(headingCount, paragraphList.length),
+    listRate: ratio(listCount, paragraphList.length),
+    averageSentencesPerParagraph: ratio(sentenceList.length, paragraphList.length),
+    sentenceLengthSpread: round(sentenceWordPercentiles.p90 - sentenceWordPercentiles.p25),
+    paragraphLengthSpread: round(paragraphWordPercentiles.p90 - paragraphWordPercentiles.p25),
+    sentenceWordPercentiles,
+    paragraphWordPercentiles,
     openers: openerCounts(sentenceList),
     repeatedPhrases: repeatedPhrases(tokenList),
     fidelityScore
@@ -175,15 +199,37 @@ export function metricsForTexts(texts: string[], fidelityScore = 0): CorpusMetri
 
 function featureDefinitions(metrics: CorpusMetrics): Array<[string, string, number, string]> {
   return [
+    ["sentence-p25", "Short sentence floor", metrics.sentenceWordPercentiles.p25, "words"],
     ["sentence-p50", "Median sentence length", metrics.sentenceWordPercentiles.p50, "words"],
+    ["sentence-p75", "Upper sentence rhythm", metrics.sentenceWordPercentiles.p75, "words"],
     ["sentence-p90", "Long sentence ceiling", metrics.sentenceWordPercentiles.p90, "words"],
+    ["sentence-spread", "Sentence rhythm spread", metrics.sentenceLengthSpread, "words"],
+    ["paragraph-p25", "Short paragraph floor", metrics.paragraphWordPercentiles.p25, "words"],
     ["paragraph-p50", "Median paragraph length", metrics.paragraphWordPercentiles.p50, "words"],
+    ["paragraph-p75", "Upper paragraph rhythm", metrics.paragraphWordPercentiles.p75, "words"],
+    ["paragraph-p90", "Long paragraph ceiling", metrics.paragraphWordPercentiles.p90, "words"],
+    ["paragraph-spread", "Paragraph rhythm spread", metrics.paragraphLengthSpread, "words"],
+    ["sentences-per-paragraph", "Sentences per paragraph", metrics.averageSentencesPerParagraph, "ratio"],
+    ["average-word-length", "Average word length", metrics.averageWordLength, "characters"],
     ["lexical-diversity", "Lexical diversity", metrics.uniqueWordRatio, "ratio"],
     ["function-words", "Function-word rate", metrics.functionWordRate, "ratio"],
+    ["first-person", "First-person rate", metrics.firstPersonRate, "ratio"],
+    ["direct-address", "Direct-address rate", metrics.directAddressRate, "ratio"],
+    ["third-person", "Third-person rate", metrics.thirdPersonRate, "ratio"],
     ["hedging", "Hedging rate", metrics.hedgingRate, "ratio"],
     ["contractions", "Contraction rate", metrics.contractionRate, "ratio"],
+    ["questions", "Question rate", metrics.questionRate, "ratio"],
+    ["exclamations", "Exclamation rate", metrics.exclamationRate, "ratio"],
+    ["em-dashes", "Em-dash rate", metrics.emDashRate, "ratio"],
+    ["commas", "Comma rate", metrics.commaRate, "ratio"],
+    ["semicolons", "Semicolon rate", metrics.semicolonRate, "ratio"],
+    ["colons", "Colon rate", metrics.colonRate, "ratio"],
+    ["parentheticals", "Parenthetical rate", metrics.parentheticalRate, "ratio"],
     ["lowercase-openings", "Lowercase sentence starts", metrics.lowercaseStartRate, "ratio"],
     ["markdown", "Markdown density", metrics.markdownRate, "per word"],
+    ["bullets", "List-item rate", metrics.bulletRate, "ratio"],
+    ["headings", "Heading rate", metrics.headingRate, "ratio"],
+    ["lists", "List structure rate", metrics.listRate, "ratio"],
     ["repeated-openings", "Repeated opening rate", metrics.repeatedOpeningRate, "ratio"]
   ];
 }
@@ -205,7 +251,8 @@ function buildBands(register: RegisterName, registerSamples: NormalizedSample[],
     const values = valuesByFeature.get(id) || [];
     const min = values.length ? Math.min(...values) : value;
     const max = values.length ? Math.max(...values) : value;
-    const margin = values.length > 1 ? Math.max(unit === "ratio" ? .02 : .5, (max - min) * .2) : Math.max(unit === "ratio" ? .05 : 1, Math.abs(value) * .15);
+    const rateLike = unit === "ratio" || unit === "per word";
+    const margin = values.length > 1 ? Math.max(rateLike ? .02 : .5, (max - min) * .2) : Math.max(rateLike ? .05 : 1, Math.abs(value) * .15);
     const targetMin = Math.max(0, round(min - margin));
     const targetMax = round(max + margin);
     return {
@@ -280,35 +327,46 @@ export function analyzeCorpus(samples: CorpusSampleInput[] = []): CorpusAnalysis
     result[register] = registerAnalysis(register, registerGroups[register]);
     return result;
   }, {} as Record<RegisterName, RegisterAnalysis>);
-  const activeRegister = registerGroups.default.length ? "default" : (usable[0]?.register || "default");
-  const activeSamples = registerGroups[activeRegister].length ? registerGroups[activeRegister] : usable;
-  const activeMetrics = registerAnalyses[activeRegister].metrics;
-  const addRule = (condition: boolean, claim: string, matchingSamples: NormalizedSample[], confidence: "low" | "medium" | "high" = "medium"): void => {
+  const addRule = (register: RegisterName, samplesForRegister: NormalizedSample[], condition: boolean, claim: string, matchingSamples: NormalizedSample[], confidence: "low" | "medium" | "high" = "medium"): void => {
     if (!condition || !matchingSamples.length) return;
-    const support = firstSupportingSpan(matchingSamples[0]);
+    const supports = matchingSamples.map((sample) => {
+      const support = firstSupportingSpan(sample);
+      return { sampleId: sample.id, sourceId: sample.id, excerpt: support.excerpt, span: { start: support.start, end: support.end } };
+    });
+    const support = supports[0];
     evidence.push(createEvidence({
       sourceType: "corpus",
       sourceRef: matchingSamples.map((sample) => sample.label).join(", "),
       sourceId: matchingSamples[0].id,
       sampleIds: matchingSamples.map((sample) => sample.id),
-      span: { start: support.start, end: support.end },
-      coverage: ratio(matchingSamples.length, activeSamples.length),
-      scope: activeRegister === "default" ? "global" : "register",
+      span: support.span,
+      supports,
+      coverage: ratio(matchingSamples.length, samplesForRegister.length),
+      scope: register === "default" ? "global" : "register",
       permission: matchingSamples[0].permission,
       rightsNote: matchingSamples[0].rightsNote,
-      register: activeRegister,
+      register,
       claim,
       excerpt: support.excerpt,
       confidence
     }));
   };
-  addRule(activeMetrics.contractionRate > 0, "Use contractions when they sound natural.", activeSamples.filter((sample) => metricsForTexts([sample.text]).contractionRate > 0), activeMetrics.contractionRate > .01 ? "high" : "medium");
-  addRule(activeMetrics.averageParagraphWords > 0 && activeMetrics.averageParagraphWords <= 70, "Keep paragraphs focused and relatively short.", activeSamples.filter((sample) => metricsForTexts([sample.text]).averageParagraphWords <= 70), activeMetrics.averageParagraphWords <= 45 ? "high" : "medium");
-  addRule(activeMetrics.uniqueWordRatio < .65, "Prefer specific, familiar language over unnecessary abstraction.", activeSamples, "low");
-  addRule(activeMetrics.questionCount > 0, "Use occasional questions when they help the reader think or orient themselves.", activeSamples.filter((sample) => sample.text.includes("?")), "medium");
-  addRule(activeMetrics.directAddressRate > .01, "Address the reader directly when the context calls for it.", activeSamples.filter((sample) => metricsForTexts([sample.text]).directAddressRate > .01), activeMetrics.directAddressRate > .03 ? "high" : "medium");
-  addRule(activeMetrics.firstPersonRate > .01, "Use a grounded first-person point of view where it adds accountability or warmth.", activeSamples.filter((sample) => metricsForTexts([sample.text]).firstPersonRate > .01), activeMetrics.firstPersonRate > .03 ? "high" : "medium");
-  addRule(activeMetrics.lowercaseStartRate > .1, "Preserve lowercase openings when they are part of the writer's natural rhythm.", activeSamples.filter((sample) => metricsForTexts([sample.text]).lowercaseStartRate > .1), "medium");
+  const populatedRegisters = REGISTER_NAMES.filter((register) => registerGroups[register].length > 0);
+  populatedRegisters.forEach((register) => {
+    const registerSamples = registerGroups[register];
+    const registerMetrics = registerAnalyses[register].metrics;
+    const sampleMetrics = (predicate: (metrics: CorpusMetrics) => boolean): NormalizedSample[] => registerSamples.filter((sample) => predicate(metricsForTexts([sample.text])));
+    addRule(register, registerSamples, registerMetrics.contractionRate > 0, "Use contractions when they sound natural.", sampleMetrics((metrics) => metrics.contractionRate > 0), registerMetrics.contractionRate > .01 ? "high" : "medium");
+    addRule(register, registerSamples, registerMetrics.averageParagraphWords > 0 && registerMetrics.averageParagraphWords <= 70, "Keep paragraphs focused and relatively short.", sampleMetrics((metrics) => metrics.averageParagraphWords > 0 && metrics.averageParagraphWords <= 70), registerMetrics.averageParagraphWords <= 45 ? "high" : "medium");
+    addRule(register, registerSamples, registerMetrics.uniqueWordRatio < .65, "Prefer specific, familiar language over unnecessary abstraction.", registerSamples, "low");
+    addRule(register, registerSamples, registerMetrics.questionCount > 0, "Use occasional questions when they help the reader think or orient themselves.", sampleMetrics((metrics) => metrics.questionCount > 0));
+    addRule(register, registerSamples, registerMetrics.exclamationCount > 0, "Use exclamation marks sparingly and only when the energy is intentional.", sampleMetrics((metrics) => metrics.exclamationCount > 0), "low");
+    addRule(register, registerSamples, registerMetrics.directAddressRate > .01, "Address the reader directly when the context calls for it.", sampleMetrics((metrics) => metrics.directAddressRate > .01), registerMetrics.directAddressRate > .03 ? "high" : "medium");
+    addRule(register, registerSamples, registerMetrics.firstPersonRate > .01, "Use a grounded first-person point of view where it adds accountability or warmth.", sampleMetrics((metrics) => metrics.firstPersonRate > .01), registerMetrics.firstPersonRate > .03 ? "high" : "medium");
+    addRule(register, registerSamples, registerMetrics.hedgingRate > .01, "Use careful qualifiers when the evidence or context calls for them.", sampleMetrics((metrics) => metrics.hedgingRate > .01), "low");
+    addRule(register, registerSamples, registerMetrics.lowercaseStartRate > .1, "Preserve lowercase openings when they are part of the writer's natural rhythm.", sampleMetrics((metrics) => metrics.lowercaseStartRate > .1), "medium");
+    addRule(register, registerSamples, registerMetrics.repeatedOpeningRate > .2, "Vary sentence openings unless repetition is doing useful structural work.", sampleMetrics((metrics) => metrics.repeatedOpeningRate > .2), "low");
+  });
 
   return {
     analysisVersion: ANALYSIS_VERSION,

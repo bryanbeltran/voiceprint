@@ -44,6 +44,7 @@ export function applyCorpusAnalysis(profile: VoiceprintProfile, analysis: Corpus
       heldOut: sample.heldOut
     })),
     heldOutSampleIds: analysis.heldOutSampleIds,
+    heldOutEvaluation: analysis.heldOutEvaluation || null,
     issues: analysis.issues,
     contaminationMatches: analysis.contaminationMatches
   };

@@ -1,4 +1,4 @@
-import { ADAPTER_TARGETS, type AdapterTarget, type VoiceprintPackage, type VoiceprintProfile } from "../types";
+import { ADAPTER_TARGETS, REGISTER_NAMES, type AdapterTarget, type RegisterName, type VoiceprintPackage, type VoiceprintProfile } from "../types";
 import { sanitizeForPersistence, stableStringify, validateProfile } from "../profile/schema";
 import { compileProfile } from "./adapters";
 
@@ -9,6 +9,13 @@ export function createVoiceprintPackage(profile: VoiceprintProfile, includeEvide
     result[target] = compileProfile(checked.value, target, { register: "default", includeEvidence });
     return result;
   }, {} as Record<AdapterTarget, string>);
+  const registerArtifacts = REGISTER_NAMES.reduce<Record<RegisterName, Record<AdapterTarget, string>>>((result, register) => {
+    result[register] = ADAPTER_TARGETS.reduce<Record<AdapterTarget, string>>((targetResult, target) => {
+      targetResult[target] = compileProfile(checked.value, target, { register, includeEvidence });
+      return targetResult;
+    }, {} as Record<AdapterTarget, string>);
+    return result;
+  }, {} as Record<RegisterName, Record<AdapterTarget, string>>);
   return {
     packageVersion: "1.0.0",
     profileId: checked.value.profileId,
@@ -23,7 +30,8 @@ export function createVoiceprintPackage(profile: VoiceprintProfile, includeEvide
       universal: "Import the .voiceprint.json profile or copy universal.md into your AI tool's instructions.",
       agents: "Copy agent-skill.md to a compatible skills directory, or use the generated target artifact for Codex, Claude, Cursor, ChatGPT, or Gemini."
     },
-    artifacts
+    artifacts,
+    registerArtifacts
   };
 }
 

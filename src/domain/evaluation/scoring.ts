@@ -36,6 +36,13 @@ function featureScore(feature: FeatureDrift): number {
   return Math.max(0, 1 - distance / (width * 2 + .1));
 }
 
+function featureRecommendation(feature: Pick<FeatureDrift, "status" | "label" | "targetMin" | "targetMax" | "unit">): string {
+  if (feature.status === "within") return `Keep ${feature.label.toLowerCase()} within the observed range.`;
+  if (feature.status === "insufficient") return `Collect more approved samples before changing ${feature.label.toLowerCase()}.`;
+  const target = feature.status === "low" ? `at least ${feature.targetMin}` : `no more than ${feature.targetMax}`;
+  return `Aim for ${target} ${feature.unit} for ${feature.label.toLowerCase()}.`;
+}
+
 export function scoreTextAgainstProfile(text: string, profile: VoiceprintProfile, register: RegisterName = "default"): ProfileScore {
   const normalized = normalizeText(text, 20_000);
   const lower = normalized.toLowerCase();
@@ -60,12 +67,15 @@ export function scoreTextAgainstProfile(text: string, profile: VoiceprintProfile
   const features: FeatureDrift[] = bands.map((band) => {
     const actual = round(featureValue(metrics, band.id));
     const status = band.coverage < .34 ? "insufficient" : statusFor(actual, band.targetMin, band.targetMax);
-    return { id: band.id, label: band.label, actual, targetMin: band.targetMin, targetMax: band.targetMax, unit: band.unit, status, detail: status === "within" ? "Within the observed profile band." : status === "insufficient" ? "Not enough reference samples for a confident comparison." : `${status === "low" ? "Below" : "Above"} the observed profile band.` };
+    const recommendation = featureRecommendation({ label: band.label, status, targetMin: band.targetMin, targetMax: band.targetMax, unit: band.unit });
+    return { id: band.id, label: band.label, actual, targetMin: band.targetMin, targetMax: band.targetMax, unit: band.unit, status, detail: status === "within" ? "Within the observed profile band." : status === "insufficient" ? "Not enough reference samples for a confident comparison." : `${status === "low" ? "Below" : "Above"} the observed profile band.`, recommendation };
   });
   features.forEach((feature) => add(feature.label, featureScore(feature), feature.detail));
   const expectedRegister = profile.registers?.[register]?.label || register;
   const overall = round(ratio(checks.reduce((sum, check) => sum + check.score, 0), checks.length) * 100, 0);
-  return { overall, register: expectedRegister, wordCount: tokenList.length, checks, features, driftCount: features.filter((feature) => feature.status === "low" || feature.status === "high").length, matchedAvoid };
+  const recommendations = features.filter((feature) => feature.status !== "within").map((feature) => feature.recommendation);
+  if (matchedAvoid.length) recommendations.unshift(`Review or replace configured avoid phrases: ${matchedAvoid.join(", ")}.`);
+  return { overall, register: expectedRegister, wordCount: tokenList.length, checks, features, driftCount: features.filter((feature) => feature.status === "low" || feature.status === "high").length, matchedAvoid, recommendations };
 }
 
 export function evaluateHeldOutSamples(profile: VoiceprintProfile, samples: Array<{ id: string; label?: string; text: string }>, register: RegisterName = "default"): HeldOutEvaluation {

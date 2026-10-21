@@ -5,6 +5,7 @@ import {
   type BuildProfileOptions,
   type EvidenceConfidence,
   type EvidenceDecisionPatch,
+  type EvidenceSupport,
   type EvidenceScope,
   type EvidenceSourceType,
   type EvidenceStatus,
@@ -87,9 +88,23 @@ export function normalizeCorpusMetrics(input: Partial<CorpusMetrics> = {}): Corp
     directAddressRate: Number(input.directAddressRate) || 0,
     functionWordRate: Number(input.functionWordRate) || 0,
     hedgingRate: Number(input.hedgingRate) || 0,
+    thirdPersonRate: Number(input.thirdPersonRate) || 0,
     lowercaseStartRate: Number(input.lowercaseStartRate) || 0,
     markdownRate: Number(input.markdownRate) || 0,
     repeatedOpeningRate: Number(input.repeatedOpeningRate) || 0,
+    questionRate: Number(input.questionRate) || 0,
+    exclamationRate: Number(input.exclamationRate) || 0,
+    emDashRate: Number(input.emDashRate) || 0,
+    commaRate: Number(input.commaRate) || 0,
+    semicolonRate: Number(input.semicolonRate) || 0,
+    colonRate: Number(input.colonRate) || 0,
+    parentheticalRate: Number(input.parentheticalRate) || 0,
+    bulletRate: Number(input.bulletRate) || 0,
+    headingRate: Number(input.headingRate) || 0,
+    listRate: Number(input.listRate) || 0,
+    averageSentencesPerParagraph: Number(input.averageSentencesPerParagraph) || 0,
+    sentenceLengthSpread: Number(input.sentenceLengthSpread) || 0,
+    paragraphLengthSpread: Number(input.paragraphLengthSpread) || 0,
     sentenceWordPercentiles: { ...EMPTY_PERCENTILES, ...(input.sentenceWordPercentiles || {}) },
     paragraphWordPercentiles: { ...EMPTY_PERCENTILES, ...(input.paragraphWordPercentiles || {}) },
     openers: Array.isArray(input.openers) ? input.openers.slice(0, 20) : [],
@@ -168,6 +183,16 @@ export function createEvidence(input: Partial<VoiceprintEvidence> & { claim?: st
   const span = input.span && Number.isFinite(input.span.start) && Number.isFinite(input.span.end)
     ? { start: Math.max(0, Number(input.span.start)), end: Math.max(0, Number(input.span.end)) }
     : null;
+  const supports: EvidenceSupport[] = Array.isArray(input.supports)
+    ? input.supports.slice(0, 32).map((support) => ({
+      sampleId: normalizeText(support.sampleId, 120),
+      sourceId: normalizeText(support.sourceId, 160),
+      excerpt: normalizeText(support.excerpt, 800),
+      span: support.span && Number.isFinite(support.span.start) && Number.isFinite(support.span.end)
+        ? { start: Math.max(0, Number(support.span.start)), end: Math.max(0, Number(support.span.end)) }
+        : null
+    })).filter((support) => support.sampleId || support.sourceId || support.excerpt)
+    : [];
   const scope: EvidenceScope = input.scope === "global" ? "global" : "register";
   const permissionValues: SourcePermission[] = ["owned", "licensed", "authorized", "unknown"];
   const permission: SourcePermission = permissionValues.includes(input.permission as SourcePermission)
@@ -184,6 +209,7 @@ export function createEvidence(input: Partial<VoiceprintEvidence> & { claim?: st
     sourceId,
     sampleIds,
     span,
+    supports,
     coverage: Math.min(1, Math.max(0, Number(input.coverage) || 0)),
     scope,
     permission,
@@ -348,7 +374,11 @@ export function sanitizeForPersistence(
   delete (next.provenance as Partial<typeof next.provenance> & { rawSamples?: unknown }).rawSamples;
   next.evidence = next.evidence.map((item) => ({
     ...item,
-    excerpt: options.persistApprovedEvidence && item.status === "approved" ? item.excerpt : ""
+    excerpt: options.persistApprovedEvidence && item.status === "approved" ? item.excerpt : "",
+    supports: (item.supports || []).map((support) => ({
+      ...support,
+      excerpt: options.persistApprovedEvidence && item.status === "approved" ? support.excerpt : ""
+    }))
   }));
   next.provenance.sources = (next.provenance.sources || []).map((source) => ({
     ...source,
@@ -417,6 +447,7 @@ export function validateProfile(input: unknown): ValidationResult {
     analysis.registers = normalizeRegisterAnalyses(analysis.registers, analysis.metrics);
     analysis.sources = Array.isArray(analysis.sources) ? analysis.sources : [];
     analysis.heldOutSampleIds = Array.isArray(analysis.heldOutSampleIds) ? analysis.heldOutSampleIds : [];
+    if (analysis.heldOutEvaluation === undefined) analysis.heldOutEvaluation = null;
   }
   if (value.preferences && typeof value.preferences === "object") {
     const preferences = value.preferences as VoiceprintProfile["preferences"];

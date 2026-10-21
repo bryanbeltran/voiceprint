@@ -6,10 +6,12 @@ import {
   exportVoiceprintPackage,
   createProfileVersion,
   diffProfiles,
+  evaluateHeldOutSamples,
   exportProfile,
   importProfile,
   mergeProfileFromInterview,
   readPersistedState,
+  redactCorpusText,
   runRegressionFixtures,
   sanitizeForPersistence,
   writePersistedState,
@@ -113,6 +115,7 @@ function initialWorkspace(): WorkspaceState {
       metrics: loaded.profile.review.analysis.metrics,
       registers: loaded.profile.review.analysis.registers,
       heldOutSampleIds: loaded.profile.review.analysis.heldOutSampleIds,
+      heldOutEvaluation: loaded.profile.review.analysis.heldOutEvaluation,
       issues: loaded.profile.review.analysis.issues,
       contaminationMatches: loaded.profile.review.analysis.contaminationMatches,
       evidence: loaded.profile.evidence.filter((item) => item.sourceType === "corpus")
@@ -184,16 +187,24 @@ export default function App() {
     }
     notify("Analyzing locally…");
     void analyzeCorpusAsync(samples).then((rawAnalysis) => {
-      const analysis: CorpusAnalysis = {
+      const baseAnalysis: CorpusAnalysis = {
         ...rawAnalysis,
         evidence: rawAnalysis.evidence.map((item) => ({ ...item, register: item.register || register }))
       };
       setWorkspace((current) => {
         const base = buildProfileFromInterview(current.answers, { profileId: current.profile.profileId });
+        const provisional = applyCorpusAnalysis(base, baseAnalysis);
+        const heldOutSamples = samples
+          .filter((sample) => sample.heldOut && sample.consentGranted !== false)
+          .map((sample, index) => ({ id: sample.id || `held-out-${index + 1}`, label: sample.label, text: sample.redact === false ? sample.text : redactCorpusText(sample.text) }));
+        const analysis: CorpusAnalysis = {
+          ...baseAnalysis,
+          heldOutEvaluation: heldOutSamples.length ? evaluateHeldOutSamples(provisional, heldOutSamples, register) : null
+        };
         const next = mergeProfileFromInterview(applyCorpusAnalysis(base, analysis), current.profile);
         return { ...current, profile: next, analysis, activeMode: "corpus" };
       });
-      notify(`${analysis.evidence.length} candidate rules ready for review.`);
+      notify(`${baseAnalysis.evidence.length} candidate rules ready for review.`);
     }).catch(() => notify("Analysis failed; the local workspace is still available."));
   };
 

@@ -3,13 +3,19 @@ import {
   analyzeCorpus,
   applyCorpusAnalysis,
   applyEvidenceDecision,
+  ADAPTER_TARGETS,
   buildProfileFromInterview,
+  createVoiceprintPackage,
   compileProfile,
   createProfileVersion,
   diffProfiles,
+  evaluateHeldOutSamples,
   exportProfile,
+  exportVoiceprintPackage,
+  featureDefinitions,
   importProfile,
   runRegressionFixtures,
+  redactCorpusText,
   sanitizeForPersistence,
   scoreTextAgainstProfile,
   stableStringify,
@@ -73,6 +79,43 @@ describe("Voiceprint domain", () => {
     expect(analysis.evidence.length).toBeGreaterThan(0);
   });
 
+  it("builds deep per-register feature bands with supporting spans", () => {
+    const samples = [
+      { id: "email-1", label: "Email one", register: "email" as const, text: "I'm writing this because the plan is clear. You can start with the small step, and I think it will help." },
+      { id: "email-2", label: "Email two", register: "email" as const, text: "We’re making progress. Perhaps you can review the next section? It matters, and we can make it concrete." },
+      { id: "chat-1", label: "Chat one", register: "chat" as const, text: "You can take the small step now! I’m here if you want a hand." }
+    ];
+    const analysis = analyzeCorpus(samples);
+    const email = analysis.registers.email;
+    expect(email.sampleCount).toBe(2);
+    expect(email.featureBands.length).toBeGreaterThan(20);
+    expect(featureDefinitions(email.metrics).map(([id]) => id)).toContain("questions");
+    expect(featureDefinitions(email.metrics).map(([id]) => id)).toContain("sentence-spread");
+    const evidence = analysis.evidence.find((item) => item.register === "email");
+    expect(evidence?.supports.length).toBeGreaterThanOrEqual(1);
+    evidence?.supports.forEach((support) => {
+      const source = samples.find((sample) => sample.id === support.sampleId);
+      expect(source).toBeDefined();
+      const processed = redactCorpusText(source!.text);
+      expect(support.span).not.toBeNull();
+      expect(processed.slice(support.span!.start, support.span!.end)).toBe(support.excerpt);
+    });
+  });
+
+  it("keeps consent and held-out samples outside reference metrics while redacting secrets", () => {
+    const analysis = analyzeCorpus([
+      { id: "train", text: "I wrote this note for the team. Contact me at writer@example.com with token_sk_123456789.", consentGranted: true, redact: true },
+      { id: "held", text: "This held-out note should be scored later, not used to infer the profile.", consentGranted: true, heldOut: true },
+      { id: "blocked", text: "This sample is not approved for use.", consentGranted: false }
+    ]);
+    expect(analysis.metrics.sampleCount).toBe(1);
+    expect(analysis.heldOutSampleIds).toEqual(["held"]);
+    expect(analysis.samples).toHaveLength(3);
+    expect(analysis.samples.find((sample) => sample.id === "train")?.redacted).toBe(true);
+    expect(analysis.issues.some((issue) => issue.id === "permission-required")).toBe(true);
+    expect(analysis.evidence.every((item) => !item.excerpt.includes("@") && item.supports.every((support) => !support.excerpt.includes("@")))).toBe(true);
+  });
+
   it("keeps corpus text out of persisted profiles by default", () => {
     const next = applyCorpusAnalysis(sampleProfile(), analyzeCorpus([{ id: "sample-1", text: "I'm clear and direct. You can use this example." }]), { now: fixedNow });
     const persisted = sanitizeForPersistence(next);
@@ -111,5 +154,43 @@ describe("Voiceprint domain", () => {
     expect(score.overall).toBeGreaterThanOrEqual(0);
     expect(score.overall).toBeLessThanOrEqual(100);
     expect(runRegressionFixtures(profile).every((result) => result.passed)).toBe(true);
+  });
+
+  it("evaluates held-out drafts with actionable drift recommendations", () => {
+    const profile = applyCorpusAnalysis(sampleProfile(), analyzeCorpus([
+      { id: "train-1", text: "I'm writing this because the next step is clear. You can start with a small example." },
+      { id: "train-2", text: "We’re making this practical. I think you can use the checklist today." }
+    ]), { now: fixedNow });
+    const evaluation = evaluateHeldOutSamples(profile, [{ id: "held-1", label: "Held out", text: "This is a very different draft with no point of view." }]);
+    expect(evaluation.sampleCount).toBe(1);
+    expect(evaluation.reports[0].score.recommendations).toBeDefined();
+    expect(evaluation.reports[0].score.wordCount).toBeGreaterThan(0);
+  });
+
+  it("creates deterministic packages for every target and register without raw samples", () => {
+    const profile = sampleProfile();
+    const first = createVoiceprintPackage(profile);
+    const second = createVoiceprintPackage(profile);
+    expect(stableStringify(first)).toBe(stableStringify(second));
+    expect(Object.keys(first.artifacts).sort()).toEqual([...ADAPTER_TARGETS].sort());
+    expect(Object.keys(first.registerArtifacts).sort()).toEqual(["chat", "default", "email", "public", "technical"]);
+    expect(Object.keys(first.registerArtifacts.email).sort()).toEqual([...ADAPTER_TARGETS].sort());
+    expect(exportVoiceprintPackage(profile)).not.toContain("rawSamples");
+  });
+
+  it("migrates the 1.0 profile shape and rejects unknown versions", () => {
+    const profile = sampleProfile();
+    const legacy = JSON.parse(exportProfile(profile)) as Record<string, unknown>;
+    legacy.schemaVersion = "1.0.0";
+    const legacyReview = legacy.review as Record<string, unknown>;
+    legacyReview.analysis = { metrics: (legacyReview.analysis as Record<string, unknown> | undefined)?.metrics || {}, issues: [], contaminationMatches: [] };
+    const migrated = importProfile(legacy);
+    expect(migrated.valid).toBe(true);
+    expect(migrated.value.schemaVersion).toBe("1.1.0");
+    expect(Object.keys(migrated.value.review.analysis?.registers || {})).toHaveLength(5);
+    expect(migrated.value.evidence[0].supports).toEqual([]);
+    const unknown = importProfile({ ...legacy, schemaVersion: "9.9.9" });
+    expect(unknown.valid).toBe(false);
+    expect(unknown.errors[0]).toMatch(/Unsupported schema version/);
   });
 });

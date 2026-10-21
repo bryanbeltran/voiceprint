@@ -20,6 +20,13 @@ export interface EvidenceSpan {
   end: number;
 }
 
+export interface EvidenceSupport {
+  sampleId: string;
+  sourceId: string;
+  excerpt: string;
+  span: EvidenceSpan | null;
+}
+
 export interface CorpusSourceMetadata {
   id: string;
   label: string;
@@ -42,6 +49,7 @@ export interface VoiceprintEvidence {
   sourceId: string;
   sampleIds: string[];
   span: EvidenceSpan | null;
+  supports: EvidenceSupport[];
   coverage: number;
   scope: EvidenceScope;
   permission: SourcePermission;
@@ -182,9 +190,23 @@ export interface CorpusMetrics {
   directAddressRate: number;
   functionWordRate: number;
   hedgingRate: number;
+  thirdPersonRate: number;
   lowercaseStartRate: number;
   markdownRate: number;
   repeatedOpeningRate: number;
+  questionRate: number;
+  exclamationRate: number;
+  emDashRate: number;
+  commaRate: number;
+  semicolonRate: number;
+  colonRate: number;
+  parentheticalRate: number;
+  bulletRate: number;
+  headingRate: number;
+  listRate: number;
+  averageSentencesPerParagraph: number;
+  sentenceLengthSpread: number;
+  paragraphLengthSpread: number;
   sentenceWordPercentiles: { p25: number; p50: number; p75: number; p90: number };
   paragraphWordPercentiles: { p25: number; p50: number; p75: number; p90: number };
   openers: Array<{ token: string; count: number; rate: number }>;
@@ -230,6 +252,7 @@ export interface CorpusAnalysis {
   metrics: CorpusMetrics;
   registers: Record<RegisterName, RegisterAnalysis>;
   heldOutSampleIds: string[];
+  heldOutEvaluation?: HeldOutEvaluation | null;
   issues: CorpusIssue[];
   contaminationMatches: ContaminationMatch[];
   evidence: VoiceprintEvidence[];
@@ -240,6 +263,7 @@ export interface AnalysisSnapshot {
   registers: Record<RegisterName, RegisterAnalysis>;
   sources: CorpusSourceMetadata[];
   heldOutSampleIds: string[];
+  heldOutEvaluation?: HeldOutEvaluation | null;
   issues: CorpusIssue[];
   contaminationMatches: ContaminationMatch[];
 }
@@ -256,6 +280,7 @@ export interface EvidenceDecisionPatch {
   claim?: string;
   register?: RegisterName;
   excerpt?: string;
+  supports?: EvidenceSupport[];
   scope?: EvidenceScope;
   rightsNote?: string;
 }
@@ -280,6 +305,7 @@ export interface VoiceprintPackage {
     agents: string;
   };
   artifacts: Record<AdapterTarget, string>;
+  registerArtifacts: Record<RegisterName, Record<AdapterTarget, string>>;
 }
 
 export interface Adapter {
@@ -300,6 +326,7 @@ export interface ProfileScore {
   features: FeatureDrift[];
   driftCount: number;
   matchedAvoid: string[];
+  recommendations: string[];
 }
 
 export interface FeatureDrift {
@@ -311,6 +338,7 @@ export interface FeatureDrift {
   unit: string;
   status: FeatureStatus;
   detail: string;
+  recommendation: string;
 }
 
 export interface HeldOutEvaluation {
