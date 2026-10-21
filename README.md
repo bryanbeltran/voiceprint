@@ -8,13 +8,13 @@ The repository is a proper React + TypeScript application. It has no backend and
 
 - Guided interview with a live canonical profile preview.
 - Corpus mode for pasted or uploaded TXT/Markdown samples.
-- Deterministic local heuristics for rhythm, paragraph shape, contractions, lexical diversity, function words, openers, punctuation, source-fidelity signals, and instruction-like contamination.
-- Per-register feature bands, percentiles, held-out audits, exact evidence spans, coverage, consent, source rights, redaction, and profile-relative drift reports.
+- Deterministic local heuristics for rhythm, paragraph shape, contractions, lexical diversity, function words, pronouns, hedging, openers, punctuation/formatting, message structure, source-fidelity signals, and instruction-like contamination.
+- Per-register feature bands, percentiles, held-out evaluation reports, exact supporting spans, sample coverage, consent, source rights, redaction, and profile-relative drift/coaching reports.
 - Evidence queue with confidence, provenance, register, and approve/edit/reject controls.
 - Register-aware compilation for default, email, chat, public/social, and technical writing.
 - Universal, Codex, Claude, ChatGPT, Cursor, Gemini, standard Agent Skills, portable package manifests, and canonical JSON exports.
 - Local profile persistence with raw corpus text and unapproved excerpts removed by default.
-- Version snapshots, restore, diffing, reset, import/export, blind A/B comparison, deterministic per-feature scoring, held-out audits, and adapter regression fixtures.
+- Version snapshots, restore, diffing, reset, import/export, blind A/B comparison, deterministic per-feature scoring, golden analyzer fixtures, held-out audits, and adapter regression fixtures.
 - Responsive, keyboard-accessible UI with reduced-motion support and a testable React component boundary.
 
 ## Run locally
@@ -38,7 +38,7 @@ npm run verify
 
 `npm run verify` runs the typecheck, lint, unit/component tests, production build, and built-entry assertions in one gate. `npm run preview` serves the production bundle locally.
 
-The UI's **Export portable package** action creates a sanitized package containing the canonical profile, provenance, install guidance, and deterministic artifacts for every supported target. See [docs/PACKAGE.md](docs/PACKAGE.md) for the contract.
+The UI's **Export portable package** action creates a sanitized package containing the canonical profile, provenance, install guidance, deterministic artifacts for every supported target, and register-specific artifacts. See [docs/PACKAGE.md](docs/PACKAGE.md) for the contract.
 
 ## Architecture
 

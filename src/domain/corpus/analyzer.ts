@@ -241,6 +241,7 @@ export function featureValue(metrics: CorpusMetrics, id: string): number {
 export { featureDefinitions };
 
 function buildBands(register: RegisterName, registerSamples: NormalizedSample[], metrics: CorpusMetrics): FeatureBand[] {
+  if (!registerSamples.length) return [];
   const valuesByFeature = new Map<string, number[]>();
   registerSamples.forEach((sample) => {
     const sampleMetrics = metricsForTexts([sample.text]);

@@ -112,6 +112,7 @@ describe("Voiceprint domain", () => {
     expect(analysis.metrics.sampleCount).toBe(1);
     expect(analysis.heldOutSampleIds).toEqual(["held"]);
     expect(analysis.samples).toHaveLength(3);
+    expect(analysis.registers.chat.featureBands).toHaveLength(0);
     expect(analysis.samples.find((sample) => sample.id === "train")?.redacted).toBe(true);
     expect(analysis.issues.some((issue) => issue.id === "permission-required")).toBe(true);
     expect(analysis.evidence.every((item) => !item.excerpt.includes("@") && item.supports.every((support) => !support.excerpt.includes("@")))).toBe(true);

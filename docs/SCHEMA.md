@@ -10,7 +10,7 @@ The schema is the canonical source of truth. Markdown adapters are compiled arti
 
 ```json
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
   "profileId": "profile-…",
   "version": 1,
   "createdAt": "ISO-8601",
@@ -75,6 +75,9 @@ Evidence is a candidate claim, not an instruction automatically applied to the p
   "sourceId": "sample-1",
   "sampleIds": ["sample-1"],
   "span": { "start": 0, "end": 84 },
+  "supports": [
+    { "sampleId": "sample-1", "sourceId": "sample-1", "excerpt": "A source excerpt", "span": { "start": 0, "end": 84 } }
+  ],
   "coverage": 0.75,
   "scope": "global | register",
   "permission": "owned | licensed | authorized | unknown",
@@ -109,7 +112,7 @@ Corpus input accepts a label, register, permission, consent flag, rights note, r
 
 ## Feature bands
 
-Each analyzed register stores deterministic feature bands rather than a single similarity score. Bands currently cover sentence and paragraph percentiles, lexical diversity, function-word rate, hedging, contractions, lowercase openings, Markdown density, and repeated openings. A feature report records the observed value, target range, coverage, confidence, and within/low/high/insufficient status. A held-out audit compares new text to these bands without adding that text to the profile.
+Each analyzed register stores deterministic feature bands rather than a single similarity score. Bands cover sentence and paragraph percentiles/spread, sentences per paragraph, average word length, lexical diversity, function words, first/direct/third-person rates, hedging, contractions, questions, exclamations, punctuation, parentheticals, lowercase openings, Markdown/list structure, and repeated openings. A feature report records the observed value, target range, coverage, confidence, status, and actionable recommendation. A held-out audit compares new text to these bands without adding that text to the profile; its score report contains no source text.
 
 ## Compatibility rules
 
@@ -118,3 +121,5 @@ Each analyzed register stores deterministic feature bands rather than a single s
 3. Do not store raw corpus input in the profile or LocalStorage envelope.
 4. Treat generated Markdown as disposable output; round-trip through canonical JSON for edits.
 5. Add fixtures and a migration note for every schema change.
+
+The `1.0.0 → 1.1.0` migration is deterministic: it normalizes legacy evidence, creates empty register analyses for older snapshots, preserves aggregate metrics and issues, and never reconstructs or retains raw samples. Unsupported versions return an explicit validation error.

@@ -1,7 +1,7 @@
 import { featureValue, metricsForTexts } from "../corpus/analyzer";
 import { normalizeText } from "../profile/schema";
 import { compileProfile } from "../compiler/adapters";
-import type { AdapterTarget, FeatureDrift, FeatureStatus, HeldOutEvaluation, ProfileScore, RegressionResult, RegisterName, VoiceprintProfile } from "../types";
+import type { AdapterTarget, FeatureDrift, FeatureRegressionResult, FeatureStatus, HeldOutEvaluation, ProfileScore, RegressionResult, RegisterName, VoiceprintProfile } from "../types";
 
 const STOP_WORDS = new Set(["a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "he", "i", "if", "in", "is", "it", "its", "of", "on", "or", "that", "the", "this", "to", "was", "we", "were", "with", "you"]);
 
@@ -43,6 +43,48 @@ function featureRecommendation(feature: Pick<FeatureDrift, "status" | "label" | 
   return `Aim for ${target} ${feature.unit} for ${feature.label.toLowerCase()}.`;
 }
 
+const FEATURE_GOLDEN_FIXTURES: Array<{ name: string; text: string; expected: Record<string, number> }> = [
+  {
+    name: "direct two-sentence note",
+    text: "I write. You read.",
+    expected: {
+      "sentence-p50": 2,
+      "paragraph-p50": 4,
+      "sentences-per-paragraph": 2,
+      "average-word-length": 3.25,
+      "lexical-diversity": 1,
+      "function-words": .5,
+      "first-person": .25,
+      "direct-address": .25
+    }
+  },
+  {
+    name: "qualified question",
+    text: "Perhaps we can pause, and ask: why now?",
+    expected: {
+      "sentence-p50": 8,
+      "paragraph-p50": 8,
+      "sentences-per-paragraph": 1,
+      "lexical-diversity": 1,
+      "function-words": .25,
+      hedging: .125,
+      questions: 1,
+      commas: .125,
+      colons: .125
+    }
+  }
+];
+
+export function runFeatureRegressionFixtures(tolerance = .0001): FeatureRegressionResult[] {
+  return FEATURE_GOLDEN_FIXTURES.flatMap((fixture) => {
+    const metrics = metricsForTexts([fixture.text]);
+    return Object.entries(fixture.expected).map(([feature, expected]) => {
+      const actual = featureValue(metrics, feature);
+      return { name: fixture.name, feature, expected, actual, tolerance, passed: Math.abs(actual - expected) <= tolerance };
+    });
+  });
+}
+
 export function scoreTextAgainstProfile(text: string, profile: VoiceprintProfile, register: RegisterName = "default"): ProfileScore {
   const normalized = normalizeText(text, 20_000);
   const lower = normalized.toLowerCase();
@@ -63,7 +105,9 @@ export function scoreTextAgainstProfile(text: string, profile: VoiceprintProfile
   add("Avoidance", matchedAvoid.length ? Math.max(0, 1 - matchedAvoid.length * .25) : 1, matchedAvoid.length ? `Potentially generic terms found: ${matchedAvoid.join(", ")}.` : "No configured avoid phrases detected.");
   add("Point of view", lower.includes("you") || lower.includes("we") || lower.includes("i") ? 1 : .65, "Checks for a visible human point of view.");
 
-  const bands = profile.review.analysis?.registers?.[register]?.featureBands || profile.review.analysis?.registers?.default?.featureBands || [];
+  const registerBands = profile.review.analysis?.registers?.[register]?.featureBands || [];
+  const defaultBands = profile.review.analysis?.registers?.default?.featureBands || [];
+  const bands = registerBands.length ? registerBands : defaultBands;
   const features: FeatureDrift[] = bands.map((band) => {
     const actual = round(featureValue(metrics, band.id));
     const status = band.coverage < .34 ? "insufficient" : statusFor(actual, band.targetMin, band.targetMax);
