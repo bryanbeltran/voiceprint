@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "1.0.0",
+  "profileId": "profile-example",
+  "version": 1,
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "subject": {
+    "name": "Maya Patel",
+    "role": "Product designer",
+    "audience": "busy humans"
+  },
+  "style": {
+    "tone": "warm and human",
+    "energy": "steady",
+    "formality": "relaxed"
+  },
+  "preferences": {
+    "readerFeeling": "oriented and curious",
+    "reachFor": "concrete details and a clear point of view",
+    "avoid": "generic, inflated, or overly polished",
+    "signOff": "Keep going.",
+    "habits": {
+      "contractions": true,
+      "shortParagraphs": true,
+      "plainLanguage": true,
+      "emDash": false
+    },
+    "customRules": []
+  },
+  "registers": {
+    "default": { "label": "Default", "purpose": "Natural writing", "tone": "warm and human", "rules": [], "fallbackTo": "default" },
+    "email": { "label": "Email", "purpose": "Useful correspondence", "tone": "warm and direct", "rules": [], "fallbackTo": "default" },
+    "chat": { "label": "Chat", "purpose": "Fast collaboration", "tone": "clear and conversational", "rules": [], "fallbackTo": "default" },
+    "public": { "label": "Public", "purpose": "Public-facing writing", "tone": "warm and vivid", "rules": [], "fallbackTo": "default" },
+    "technical": { "label": "Technical", "purpose": "Precise technical writing", "tone": "measured and clear", "rules": [], "fallbackTo": "default" }
+  },
+  "evidence": [],
+  "provenance": {
+    "mode": "interview",
+    "sampleCount": 0,
+    "retainedRawText": false,
+    "corpusHash": null,
+    "analysisVersion": "local-heuristics-1"
+  },
+  "review": {
+    "pendingCount": 0,
+    "lastReviewedAt": null
+  }
+}
