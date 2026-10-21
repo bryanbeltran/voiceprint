@@ -16,6 +16,10 @@ export function createVoiceprintPackage(profile: VoiceprintProfile, includeEvide
     }, {} as Record<AdapterTarget, string>);
     return result;
   }, {} as Record<RegisterName, Record<AdapterTarget, string>>);
+  const fileNames = ADAPTER_TARGETS.reduce<Record<AdapterTarget, string>>((result, target) => {
+    result[target] = target === "codex" || target === "agent-skill" ? "SKILL.md" : target === "cursor" ? ".voiceprint.mdc" : `${target}.md`;
+    return result;
+  }, {} as Record<AdapterTarget, string>);
   return {
     packageVersion: "1.0.0",
     profileId: checked.value.profileId,
@@ -28,7 +32,8 @@ export function createVoiceprintPackage(profile: VoiceprintProfile, includeEvide
     },
     install: {
       universal: "Import the .voiceprint.json profile or copy universal.md into your AI tool's instructions.",
-      agents: "Copy agent-skill.md to a compatible skills directory, or use the generated target artifact for Codex, Claude, Cursor, ChatGPT, or Gemini."
+      agents: "Copy SKILL.md to a compatible skills directory, or use the generated target artifact for Codex, Claude, Cursor, ChatGPT, or Gemini.",
+      fileNames
     },
     artifacts,
     registerArtifacts

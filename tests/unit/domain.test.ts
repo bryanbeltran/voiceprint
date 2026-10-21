@@ -15,6 +15,7 @@ import {
   featureDefinitions,
   importProfile,
   runRegressionFixtures,
+  runFeatureRegressionFixtures,
   redactCorpusText,
   sanitizeForPersistence,
   scoreTextAgainstProfile,
@@ -122,6 +123,7 @@ describe("Voiceprint domain", () => {
     expect(persisted.provenance.retainedRawText).toBe(false);
     expect("rawSamples" in persisted.provenance).toBe(false);
     expect(persisted.evidence.every((item) => item.excerpt === "")).toBe(true);
+    expect(persisted.evidence.every((item) => item.supports.every((support) => support.excerpt === ""))).toBe(true);
   });
 
   it("supports approve, edit, reject, versioning, and diffs", () => {
@@ -176,6 +178,13 @@ describe("Voiceprint domain", () => {
     expect(Object.keys(first.registerArtifacts).sort()).toEqual(["chat", "default", "email", "public", "technical"]);
     expect(Object.keys(first.registerArtifacts.email).sort()).toEqual([...ADAPTER_TARGETS].sort());
     expect(exportVoiceprintPackage(profile)).not.toContain("rawSamples");
+  });
+
+  it("keeps the analyzer measurements stable with golden feature fixtures", () => {
+    const results = runFeatureRegressionFixtures();
+    expect(results.length).toBeGreaterThan(15);
+    expect(results.every((result) => result.passed)).toBe(true);
+    expect(results.some((result) => result.feature === "questions")).toBe(true);
   });
 
   it("migrates the 1.0 profile shape and rejects unknown versions", () => {

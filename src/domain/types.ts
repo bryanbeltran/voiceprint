@@ -303,6 +303,7 @@ export interface VoiceprintPackage {
   install: {
     universal: string;
     agents: string;
+    fileNames: Record<AdapterTarget, string>;
   };
   artifacts: Record<AdapterTarget, string>;
   registerArtifacts: Record<RegisterName, Record<AdapterTarget, string>>;
@@ -355,6 +356,15 @@ export interface RegressionResult {
   mustContain: string[];
   passed: boolean;
   missing: string[];
+}
+
+export interface FeatureRegressionResult {
+  name: string;
+  feature: string;
+  expected: number;
+  actual: number;
+  tolerance: number;
+  passed: boolean;
 }
 
 export interface PersistenceEnvelope {
